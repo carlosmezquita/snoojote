@@ -1,6 +1,6 @@
 import { SlashCommandBuilder, ChatInputCommandInteraction, TextChannel } from 'discord.js';
 import { DiscordBot } from '../../../core/client.js';
-import { processDailyQuestion } from '../events/dailyQuestion.js';
+import triviaService from '../services/TriviaService.js';
 
 export const data = new SlashCommandBuilder()
     .setName('ask')
@@ -22,7 +22,7 @@ export const execute = async (interaction: ChatInputCommandInteraction, client: 
     }
 
     try {
-        await processDailyQuestion(channel, client);
+        await triviaService.processDailyQuestion(channel, client);
         await interaction.editReply('Daily question triggered successfully.');
     } catch (error) {
         client.logger.error(`Error triggering daily question: ${error}`);

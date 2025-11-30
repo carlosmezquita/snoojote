@@ -1,6 +1,7 @@
-import { SlashCommandBuilder, ChatInputCommandInteraction, EmbedBuilder } from 'discord.js';
+import { SlashCommandBuilder, ChatInputCommandInteraction } from 'discord.js';
 import { DiscordBot } from '../../../core/client.js';
 import economyService from '../services/economyService.js';
+import { createEmbed, Colors } from '../../../shared/utils/embeds.js';
 
 export const data = new SlashCommandBuilder()
     .setName('balance')
@@ -14,11 +15,11 @@ export const execute = async (interaction: ChatInputCommandInteraction, client: 
     const target = interaction.options.getUser('user') || interaction.user;
     const balance = await economyService.getBalance(target.id);
 
-    const embed = new EmbedBuilder()
-        .setColor(0x00AE86)
-        .setTitle(`${target.username}'s Balance`)
-        .setDescription(`💰 **${balance}** points`)
-        .setTimestamp();
+    const embed = createEmbed(
+        `${target.username}'s Balance`,
+        `💰 **${balance}** points`,
+        Colors.Success
+    ).setTimestamp();
 
     await interaction.reply({ embeds: [embed] });
 };

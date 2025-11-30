@@ -1,6 +1,6 @@
 import { Collection } from 'discord.js';
 
-class InviteCache {
+class InviteCacheService {
     private cache: Map<string, Collection<string, number>> = new Map();
 
     public get(guildId: string): Collection<string, number> | undefined {
@@ -12,4 +12,4 @@ class InviteCache {
     }
 }
 
-export default new InviteCache();
+export default new InviteCacheService();

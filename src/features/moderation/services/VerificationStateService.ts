@@ -1,12 +1,6 @@
-export interface VerificationState {
-    attempts: number;
-    channelId: string;
-    mainMsgId: string;
-    warningMsgId: string | null;
-    timeouts: NodeJS.Timeout[];
-}
+import { VerificationState } from '../types/verification.js';
 
-class VerificationStateManager {
+class VerificationStateService {
     private state: Map<string, VerificationState> = new Map();
 
     public get(userId: string): VerificationState | undefined {
@@ -26,4 +20,4 @@ class VerificationStateManager {
     }
 }
 
-export default new VerificationStateManager();
+export default new VerificationStateService();

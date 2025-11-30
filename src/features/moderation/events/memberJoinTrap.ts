@@ -1,8 +1,8 @@
 import { Events, GuildMember, ChannelType, PermissionFlagsBits, ActionRowBuilder, ButtonBuilder, ButtonStyle, AttachmentBuilder, TextChannel, Collection } from 'discord.js';
 import { DiscordBot } from '../../../core/client.js';
-import inviteCache from '../utils/inviteCache.js';
-import verificationState from '../utils/verificationState.js';
-import { generateCaptchaText, drawCaptchaImage } from '../utils/captcha.js';
+import inviteCache from '../services/InviteCacheService.js';
+import verificationState from '../services/VerificationStateService.js';
+import captchaService from '../services/CaptchaService.js';
 
 import { config } from '../../../config.js';
 
@@ -132,8 +132,8 @@ async function sendLog(guild: any, text: string, client: DiscordBot) {
 }
 
 export async function generateChallengePayload(memberId: string, attemptsLeft: number) {
-    const captchaText = generateCaptchaText();
-    const imageBuffer = await drawCaptchaImage(captchaText);
+    const captchaText = captchaService.generateCaptchaText();
+    const imageBuffer = await captchaService.drawCaptchaImage(captchaText);
     const attachment = new AttachmentBuilder(imageBuffer, { name: 'challenge.png' });
 
     const row = new ActionRowBuilder<ButtonBuilder>().addComponents(

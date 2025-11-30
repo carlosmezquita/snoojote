@@ -1,6 +1,6 @@
 import { Events, Interaction, ModalBuilder, TextInputBuilder, TextInputStyle, ActionRowBuilder, ButtonStyle, ButtonBuilder, AttachmentBuilder, TextChannel } from 'discord.js';
 import { DiscordBot } from '../../../core/client.js';
-import verificationState from '../utils/verificationState.js';
+import verificationState from '../services/VerificationStateService.js';
 import { generateChallengePayload } from './memberJoinTrap.js';
 
 import { config } from '../../../config.js';

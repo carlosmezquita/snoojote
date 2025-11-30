@@ -1,7 +1,7 @@
-import { ChannelType, PermissionFlagsBits, Guild, User, TextChannel, EmbedBuilder, ActionRowBuilder, ButtonBuilder, ButtonStyle } from 'discord.js';
+import { ChannelType, PermissionFlagsBits, Guild, User, TextChannel, ActionRowBuilder, ButtonBuilder, ButtonStyle } from 'discord.js';
 import db from '../../../database/index.js';
-
 import { config } from '../../../config.js';
+import { createEmbed, Colors } from '../../../shared/utils/embeds.js';
 
 const TICKET_CATEGORY_ID = config.channels.ticketCategory;
 const SUPPORT_ROLE_ID = config.roles.support;
@@ -42,10 +42,11 @@ export class TicketService {
 
             await db.run('INSERT INTO tickets (channel_id, user_id, status) VALUES (?, ?, ?)', [channel.id, user.id, 'open']);
 
-            const embed = new EmbedBuilder()
-                .setTitle(`Ticket de ${user.username}`)
-                .setDescription("Un miembro del equipo de soporte te atenderá pronto.\nPara cerrar el ticket, pulsa el botón de abajo.")
-                .setColor(0x5865F2);
+            const embed = createEmbed(
+                `Ticket de ${user.username}`,
+                "Un miembro del equipo de soporte te atenderá pronto.\nPara cerrar el ticket, pulsa el botón de abajo.",
+                Colors.Info
+            );
 
             const row = new ActionRowBuilder<ButtonBuilder>()
                 .addComponents(
