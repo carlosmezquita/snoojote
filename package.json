@@ -1,0 +1,34 @@
+{
+  "name": "new_snoojote",
+  "version": "1.0.0",
+  "description": "",
+  "main": "index.js",
+  "scripts": {
+    "start": "node dist/index.js",
+    "dev": "ts-node src/index.ts",
+    "build": "tsc",
+    "test": "echo \"Error: no test specified\" && exit 1"
+  },
+  "keywords": [],
+  "author": "",
+  "license": "ISC",
+  "type": "module",
+  "dependencies": {
+    "canvas": "^3.2.0",
+    "chalk": "^4.1.2",
+    "discord.js": "^14.16.3",
+    "dotenv": "^16.4.5",
+    "glob": "^11.0.0",
+    "node-cron": "^3.0.3",
+    "sqlite3": "^5.1.7",
+    "winston": "^3.17.0"
+  },
+  "devDependencies": {
+    "@types/node": "^22.10.1",
+    "@types/node-cron": "^3.0.11",
+    "@types/sqlite3": "^3.1.11",
+    "@types/ws": "^8.5.13",
+    "ts-node": "^10.9.2",
+    "typescript": "^5.7.2"
+  }
+}
