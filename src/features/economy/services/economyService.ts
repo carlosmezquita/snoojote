@@ -1,19 +1,23 @@
-import db from '../../../database/index.js';
+import db from '../../../database/db.js';
+import { users } from '../../../database/schema.js';
+import { eq, sql, desc } from 'drizzle-orm';
 
 export class EconomyService {
     async getBalance(userId: string): Promise<number> {
-        const user = await db.get<{ user_id: string, points: number }>('SELECT points FROM users WHERE user_id = ?', [userId]);
+        const user = await db.select({ points: users.points })
+            .from(users)
+            .where(eq(users.userId, userId))
+            .get();
         return user ? user.points : 0;
     }
 
     async addBalance(userId: string, amount: number): Promise<void> {
-        const user = await db.get<{ user_id: string, points: number }>('SELECT points FROM users WHERE user_id = ?', [userId]);
-
-        if (user) {
-            await db.run('UPDATE users SET points = points + ? WHERE user_id = ?', [amount, userId]);
-        } else {
-            await db.run('INSERT INTO users (user_id, points) VALUES (?, ?)', [userId, amount]);
-        }
+        await db.insert(users)
+            .values({ userId, points: amount })
+            .onConflictDoUpdate({
+                target: users.userId,
+                set: { points: sql`${users.points} + ${amount}` }
+            });
     }
 
     async transfer(senderId: string, receiverId: string, amount: number): Promise<boolean> {
@@ -26,7 +30,12 @@ export class EconomyService {
     }
 
     async getLeaderboard(limit: number = 10): Promise<{ user_id: string, points: number }[]> {
-        return await db.all<{ user_id: string, points: number }>(`SELECT user_id, points FROM users ORDER BY points DESC LIMIT ?`, [limit]);
+        const leaderboard = await db.select({ user_id: users.userId, points: users.points })
+            .from(users)
+            .orderBy(desc(users.points))
+            .limit(limit);
+
+        return leaderboard;
     }
 }
 

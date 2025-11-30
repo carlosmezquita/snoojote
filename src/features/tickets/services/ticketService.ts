@@ -1,5 +1,7 @@
 import { ChannelType, PermissionFlagsBits, Guild, User, TextChannel, ActionRowBuilder, ButtonBuilder, ButtonStyle } from 'discord.js';
-import db from '../../../database/index.js';
+import db from '../../../database/db.js';
+import { tickets } from '../../../database/schema.js';
+import { eq, and } from 'drizzle-orm';
 import { config } from '../../../config.js';
 import { createEmbed, Colors } from '../../../shared/utils/embeds.js';
 
@@ -9,7 +11,11 @@ const SUPPORT_ROLE_ID = config.roles.support;
 export class TicketService {
     async createTicket(user: User, guild: Guild): Promise<TextChannel | null> {
         // Check if user already has a ticket
-        const existingTicket = await db.get<{ channel_id: string }>('SELECT channel_id FROM tickets WHERE user_id = ? AND status = ?', [user.id, 'open']);
+        const existingTicket = await db.select()
+            .from(tickets)
+            .where(and(eq(tickets.userId, user.id), eq(tickets.status, 'open')))
+            .get();
+
         if (existingTicket) {
             return null; // User already has an open ticket
         }
@@ -40,7 +46,11 @@ export class TicketService {
                 ]
             });
 
-            await db.run('INSERT INTO tickets (channel_id, user_id, status) VALUES (?, ?, ?)', [channel.id, user.id, 'open']);
+            await db.insert(tickets).values({
+                channelId: channel.id,
+                userId: user.id,
+                status: 'open'
+            });
 
             const embed = createEmbed(
                 `Ticket de ${user.username}`,
@@ -67,7 +77,9 @@ export class TicketService {
     }
 
     async closeTicket(channel: TextChannel, closer: User): Promise<void> {
-        await db.run('UPDATE tickets SET status = ? WHERE channel_id = ?', ['closed', channel.id]);
+        await db.update(tickets)
+            .set({ status: 'closed' })
+            .where(eq(tickets.channelId, channel.id));
 
         const transcript = await this.generateTranscript(channel);
 

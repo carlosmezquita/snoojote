@@ -1,6 +1,7 @@
 import fs from 'fs';
 import path from 'path';
-import db from '../database/index.js';
+import db from '../database/db.js';
+import { streaks } from '../database/schema.js';
 import logger from '../utils/logger.js';
 
 const streaksPath = path.join(process.cwd(), 'data', 'streaks.json');
@@ -29,7 +30,12 @@ const streaksPath = path.join(process.cwd(), 'data', 'streaks.json');
             }
 
             if (streak > 0) {
-                await db.run('INSERT OR REPLACE INTO streaks (user_id, streak, last_streak_date) VALUES (?, ?, ?)', [userId, streak, lastDate]);
+                await db.insert(streaks)
+                    .values({ userId, streak, lastStreakDate: lastDate })
+                    .onConflictDoUpdate({
+                        target: streaks.userId,
+                        set: { streak, lastStreakDate: lastDate }
+                    });
                 importedCount++;
             }
         }

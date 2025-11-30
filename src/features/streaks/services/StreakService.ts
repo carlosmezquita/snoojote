@@ -1,5 +1,8 @@
 import { Message, TextChannel } from 'discord.js';
 import { DiscordBot } from '../../../core/client.js';
+import db from '../../../database/db.js';
+import { streaks } from '../../../database/schema.js';
+import { eq } from 'drizzle-orm';
 import { config } from '../../../config.js';
 
 const BOT_CHANNEL_ID = config.channels.bot;
@@ -17,13 +20,13 @@ export class StreakService {
         const todayUnix = Math.floor(streakDate.getTime() / 1000);
 
         try {
-            const userStreak = await client.db.get<{ user_id: string, streak: number, last_streak_date: string }>(
-                'SELECT * FROM streaks WHERE user_id = ?',
-                [userId]
-            );
+            const userStreak = await db.select()
+                .from(streaks)
+                .where(eq(streaks.userId, userId))
+                .get();
 
             if (userStreak) {
-                const lastDateUnix = userStreak.last_streak_date ? parseInt(userStreak.last_streak_date) : 0;
+                const lastDateUnix = userStreak.lastStreakDate ? parseInt(userStreak.lastStreakDate) : 0;
 
                 if (todayUnix === lastDateUnix) {
                     return;
@@ -43,10 +46,12 @@ export class StreakService {
                     messageContent = `${message.author.toString()} ha empezado una nueva racha.`;
                 }
 
-                await client.db.run(
-                    'UPDATE streaks SET streak = ?, last_streak_date = ? WHERE user_id = ?',
-                    [newStreak, todayUnix.toString(), userId]
-                );
+                await db.update(streaks)
+                    .set({
+                        streak: newStreak,
+                        lastStreakDate: todayUnix.toString()
+                    })
+                    .where(eq(streaks.userId, userId));
 
                 const botChannel = client.channels.cache.get(BOT_CHANNEL_ID) as TextChannel;
                 if (botChannel) {
@@ -55,10 +60,11 @@ export class StreakService {
 
             } else {
                 // New user
-                await client.db.run(
-                    'INSERT INTO streaks (user_id, streak, last_streak_date) VALUES (?, ?, ?)',
-                    [userId, 1, todayUnix.toString()]
-                );
+                await db.insert(streaks).values({
+                    userId,
+                    streak: 1,
+                    lastStreakDate: todayUnix.toString()
+                });
 
                 const botChannel = client.channels.cache.get(BOT_CHANNEL_ID) as TextChannel;
                 if (botChannel) {

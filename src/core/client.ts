@@ -2,7 +2,6 @@ import { Client, Collection, GatewayIntentBits, Partials } from 'discord.js';
 import fs from 'fs';
 import path from 'path';
 import { fileURLToPath } from 'url';
-import db from '../database/index.js';
 import logger from '../utils/logger.js';
 
 const __filename = fileURLToPath(import.meta.url);
@@ -10,7 +9,6 @@ const __dirname = path.dirname(__filename);
 
 export class DiscordBot extends Client {
     public commands: Collection<string, any>;
-    public db: typeof db;
     public logger: typeof logger;
 
     constructor() {
@@ -26,7 +24,6 @@ export class DiscordBot extends Client {
         });
 
         this.commands = new Collection();
-        this.db = db;
         this.logger = logger;
     }
 
