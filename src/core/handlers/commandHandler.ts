@@ -2,12 +2,14 @@ import { glob } from 'glob';
 import { DiscordBot } from '../client.js';
 import { ChatInputCommandInteraction } from 'discord.js';
 import path from 'path';
+import { pathToFileURL } from 'url';
 
 export default async (client: DiscordBot) => {
     const commandFiles = await glob(`${process.cwd()}/src/features/**/commands/*.{ts,js}`);
 
     for (const file of commandFiles) {
-        const command = await import(file);
+        const fileUrl = pathToFileURL(file).href;
+        const command = await import(fileUrl);
         // Handle both default export and named export, or just default
         const cmd = command.default || command;
 

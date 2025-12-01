@@ -1,7 +1,7 @@
 import { Client, Collection, GatewayIntentBits, Partials } from 'discord.js';
 import fs from 'fs';
 import path from 'path';
-import { fileURLToPath } from 'url';
+import { fileURLToPath, pathToFileURL } from 'url';
 import logger from '../utils/logger.js';
 
 const __filename = fileURLToPath(import.meta.url);
@@ -37,7 +37,9 @@ export class DiscordBot extends Client {
         const handlers = fs.readdirSync(handlerPath).filter(file => file.endsWith('.ts') || file.endsWith('.js'));
 
         for (const file of handlers) {
-            const handler = await import(path.join(handlerPath, file));
+            const filePath = path.join(handlerPath, file);
+            const fileUrl = pathToFileURL(filePath).href;
+            const handler = await import(fileUrl);
             if (handler.default) {
                 await handler.default(this);
             }

@@ -1,3 +1,4 @@
+import { pathToFileURL } from 'url';
 import { glob } from 'glob';
 import { DiscordBot } from '../client.js';
 
@@ -5,7 +6,8 @@ export default async (client: DiscordBot) => {
     const eventFiles = await glob(`${process.cwd()}/src/features/**/events/*.{ts,js}`);
 
     for (const file of eventFiles) {
-        const eventModule = await import(file);
+        const fileUrl = pathToFileURL(file).href;
+        const eventModule = await import(fileUrl);
         const event = eventModule.default || eventModule;
 
         if (event.name && event.execute) {
