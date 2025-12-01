@@ -74,9 +74,13 @@ export class StreakService {
             messageContent = `${message.author.toString()} ha empezado una nueva racha.`;
         }
 
+        const currentHighest = userStreak.highestStreak || 0;
+        const highestStreak = newStreak > currentHighest ? newStreak : currentHighest;
+
         await db.update(streaks)
             .set({
                 streak: newStreak,
+                highestStreak: highestStreak,
                 lastStreakDate: todayUnix.toString()
             })
             .where(eq(streaks.userId, message.author.id));
@@ -88,6 +92,7 @@ export class StreakService {
         await db.insert(streaks).values({
             userId: message.author.id,
             streak: 1,
+            highestStreak: 1,
             lastStreakDate: todayUnix.toString()
         });
 
@@ -112,7 +117,7 @@ export class StreakService {
     async getTopStreaks(limit: number = 10) {
         return await db.select()
             .from(streaks)
-            .orderBy(desc(streaks.streak))
+            .orderBy(desc(streaks.highestStreak))
             .limit(limit)
             .all();
     }

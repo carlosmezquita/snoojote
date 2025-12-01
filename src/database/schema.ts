@@ -12,6 +12,7 @@ export const tickets = sqliteTable('tickets', {
 export const streaks = sqliteTable('streaks', {
     userId: text('user_id').primaryKey(),
     streak: integer('streak').default(0).notNull(),
+    highestStreak: integer('highest_streak').default(0).notNull(),
     lastStreakDate: text('last_streak_date'),
 });
 

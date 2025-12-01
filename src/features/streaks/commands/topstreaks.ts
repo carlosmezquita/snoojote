@@ -16,7 +16,7 @@ export const execute = async (interaction: ChatInputCommandInteraction, client: 
     }
 
     const description = topStreaks.map((s, i) => {
-        return `${i + 1}. <@${s.userId}> - **${s.streak}** days`;
+        return `${i + 1}. <@${s.userId}> - **${s.highestStreak}** days (Current: ${s.streak})`;
     }).join('\n');
 
     const embed = createEmbed(

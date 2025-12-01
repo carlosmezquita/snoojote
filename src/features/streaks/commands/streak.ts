@@ -25,7 +25,7 @@ export const execute = async (interaction: ChatInputCommandInteraction, client: 
 
     const embed = createEmbed(
         `🔥 ${target.username}'s Streak`,
-        `Current Streak: **${userStreak.streak}** days`,
+        `Current Streak: **${userStreak.streak}** days\nHighest Streak: **${userStreak.highestStreak || userStreak.streak}** days`,
         Colors.Warning
     ).setTimestamp();
 
