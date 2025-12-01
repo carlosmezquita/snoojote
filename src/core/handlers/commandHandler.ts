@@ -1,11 +1,17 @@
 import { glob } from 'glob';
 import { DiscordBot } from '../client.js';
-import { ChatInputCommandInteraction } from 'discord.js';
+import { ChatInputCommandInteraction, MessageFlags } from 'discord.js';
 import path from 'path';
-import { pathToFileURL } from 'url';
+import { fileURLToPath, pathToFileURL } from 'url';
+
+const __filename = fileURLToPath(import.meta.url);
+const __dirname = path.dirname(__filename);
 
 export default async (client: DiscordBot) => {
-    const commandFiles = await glob(`${process.cwd()}/src/features/**/commands/*.{ts,js}`);
+    const handlerPath = path.join(__dirname, '../../features');
+    // Use forward slashes for glob pattern to ensure cross-platform compatibility
+    const pattern = `${handlerPath.replace(/\\/g, '/')}/**/commands/*.{ts,js}`;
+    const commandFiles = await glob(pattern);
 
     for (const file of commandFiles) {
         const fileUrl = pathToFileURL(file).href;
@@ -32,10 +38,14 @@ export default async (client: DiscordBot) => {
             await command.execute(interaction as ChatInputCommandInteraction, client);
         } catch (error) {
             client.logger.error(error);
-            if (interaction.replied || interaction.deferred) {
-                await interaction.followUp({ content: 'There was an error while executing this command!', ephemeral: true });
-            } else {
-                await interaction.reply({ content: 'There was an error while executing this command!', ephemeral: true });
+            try {
+                if (interaction.replied || interaction.deferred) {
+                    await interaction.followUp({ content: 'There was an error while executing this command!', flags: MessageFlags.Ephemeral });
+                } else {
+                    await interaction.reply({ content: 'There was an error while executing this command!', flags: MessageFlags.Ephemeral });
+                }
+            } catch (err) {
+                client.logger.error(`Failed to send error message to user: ${err}`);
             }
         }
     });

@@ -4,6 +4,18 @@ import logger from './utils/logger.js';
 
 const client = new DiscordBot();
 
+client.on('error', (error) => {
+    logger.error(`Discord Client Error: ${error}`);
+});
+
+process.on('unhandledRejection', (reason, promise) => {
+    logger.error('Unhandled Rejection at:', promise, 'reason:', reason);
+});
+
+process.on('uncaughtException', (error) => {
+    logger.error('Uncaught Exception:', error);
+});
+
 (async () => {
     try {
         logger.info('Starting bot...');

@@ -1,6 +1,8 @@
 import 'dotenv/config';
 
 export const config = {
+    clientId: "1118642654322884658",
+    guildId: "1118642257365585940",
     channels: {
         main: "914557391067054081",
         alerts: "1079816654269194384",

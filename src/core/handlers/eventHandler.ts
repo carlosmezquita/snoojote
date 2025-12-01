@@ -1,9 +1,15 @@
-import { pathToFileURL } from 'url';
+import { fileURLToPath, pathToFileURL } from 'url';
 import { glob } from 'glob';
+import path from 'path';
 import { DiscordBot } from '../client.js';
 
+const __filename = fileURLToPath(import.meta.url);
+const __dirname = path.dirname(__filename);
+
 export default async (client: DiscordBot) => {
-    const eventFiles = await glob(`${process.cwd()}/src/features/**/events/*.{ts,js}`);
+    const handlerPath = path.join(__dirname, '../../features');
+    const pattern = `${handlerPath.replace(/\\/g, '/')}/**/events/*.{ts,js}`;
+    const eventFiles = await glob(pattern);
 
     for (const file of eventFiles) {
         const fileUrl = pathToFileURL(file).href;
