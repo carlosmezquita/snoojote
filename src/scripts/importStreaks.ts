@@ -31,10 +31,19 @@ const streaksPath = path.join(process.cwd(), 'data', 'streaks.json');
 
             if (streak > 0) {
                 await db.insert(streaks)
-                    .values({ userId, streak, lastStreakDate: lastDate })
+                    .values({
+                        userId,
+                        streak,
+                        highestStreak: streak,
+                        lastStreakDate: lastDate
+                    })
                     .onConflictDoUpdate({
                         target: streaks.userId,
-                        set: { streak, lastStreakDate: lastDate }
+                        set: {
+                            streak,
+                            highestStreak: streak,
+                            lastStreakDate: lastDate
+                        }
                     });
                 importedCount++;
             }
