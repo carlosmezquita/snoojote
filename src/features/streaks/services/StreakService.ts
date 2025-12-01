@@ -2,7 +2,7 @@ import { Message, TextChannel } from 'discord.js';
 import { DiscordBot } from '../../../core/client.js';
 import db from '../../../database/db.js';
 import { streaks } from '../../../database/schema.js';
-import { eq } from 'drizzle-orm';
+import { eq, desc } from 'drizzle-orm';
 import { config } from '../../../config.js';
 
 const BOT_CHANNEL_ID = config.channels.bot;
@@ -100,6 +100,21 @@ export class StreakService {
         if (botChannel) {
             await botChannel.send({ content });
         }
+    }
+
+    async getUserStreak(userId: string) {
+        return await db.select()
+            .from(streaks)
+            .where(eq(streaks.userId, userId))
+            .get();
+    }
+
+    async getTopStreaks(limit: number = 10) {
+        return await db.select()
+            .from(streaks)
+            .orderBy(desc(streaks.streak))
+            .limit(limit)
+            .all();
     }
 }
 

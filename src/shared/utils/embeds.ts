@@ -6,6 +6,7 @@ export const Colors = {
     Warning: 0xf4af1b as ColorResolvable,
     Info: 0x5865F2 as ColorResolvable,
     Default: 0x0a0908 as ColorResolvable,
+    Gold: 0xFFD700 as ColorResolvable,
 };
 
 export function createEmbed(title: string, description: string, color: ColorResolvable = Colors.Default): EmbedBuilder {
