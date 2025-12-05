@@ -1,5 +1,8 @@
-import { SlashCommandBuilder, ChatInputCommandInteraction, EmbedBuilder, ActionRowBuilder, ButtonBuilder, ButtonStyle, TextChannel } from 'discord.js';
+import { SlashCommandBuilder, ChatInputCommandInteraction, EmbedBuilder, ActionRowBuilder, ButtonBuilder, TextChannel, ButtonStyle } from 'discord.js';
 import { DiscordBot } from '../../../core/client.js';
+
+import { ticketOptionsList } from '../config/options/index.js';
+import { mainTicketPanel } from '../config/panel.js';
 
 export const data = new SlashCommandBuilder()
     .setName('ticketpanel')
@@ -11,24 +14,50 @@ export const execute = async (interaction: ChatInputCommandInteraction, client: 
         return;
     }
 
-    const embed = new EmbedBuilder()
-        .setTitle("Soporte / Support")
-        .setDescription("Haz clic en el botón de abajo para abrir un ticket.\nClick the button below to open a ticket.")
-        .setColor(0x5865F2)
-        .setFooter({ text: "r/Spain Discord" });
+    let description = mainTicketPanel.description;
 
-    const row = new ActionRowBuilder<ButtonBuilder>()
-        .addComponents(
-            new ButtonBuilder()
-                .setCustomId('create_ticket')
-                .setLabel('Abrir Ticket / Open Ticket')
-                .setStyle(ButtonStyle.Primary)
-                .setEmoji('📩')
-        );
+    for (const option of ticketOptionsList) {
+        description += `**${option.icon} ${option.label}**\n${option.description}\n\n`;
+    }
+
+    const embed = new EmbedBuilder()
+        .setTitle(mainTicketPanel.title)
+        .setDescription(description)
+        .setColor(mainTicketPanel.color);
+
+    if (mainTicketPanel.footerText) {
+        embed.setFooter({ text: mainTicketPanel.footerText, iconURL: mainTicketPanel.footerIconUrl });
+    }
+
+    if (mainTicketPanel.thumbnailUrl) {
+        embed.setThumbnail(mainTicketPanel.thumbnailUrl);
+    }
+
+    if (mainTicketPanel.imageUrl) {
+        embed.setImage(mainTicketPanel.imageUrl);
+    }
+
+    const rows: ActionRowBuilder<ButtonBuilder>[] = [];
+    const buttons: ButtonBuilder[] = [];
+
+    for (const option of ticketOptionsList) {
+        const button = new ButtonBuilder()
+            .setCustomId(option.id)
+            .setLabel(option.label)
+            .setStyle(option.buttonStyle)
+            .setEmoji(option.icon);
+        buttons.push(button);
+    }
+
+    // Create rows of buttons (max 5 per row)
+    for (let i = 0; i < buttons.length; i += 5) {
+        const row = new ActionRowBuilder<ButtonBuilder>().addComponents(buttons.slice(i, i + 5));
+        rows.push(row);
+    }
 
     const channel = interaction.channel as TextChannel;
     if (channel) {
-        await channel.send({ embeds: [embed], components: [row] });
+        await channel.send({ embeds: [embed], components: rows });
         await interaction.reply({ content: "Panel enviado.", ephemeral: true });
     }
 };

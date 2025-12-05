@@ -1,4 +1,5 @@
-import { ChannelType, PermissionFlagsBits, Guild, User, TextChannel, ActionRowBuilder, ButtonBuilder, ButtonStyle } from 'discord.js';
+import { ChannelType, PermissionFlagsBits, Guild, User, TextChannel, ActionRowBuilder, ButtonBuilder, ButtonStyle, OverwriteType } from 'discord.js';
+import { TicketOptionConfig } from '../config/TicketConfig.js';
 import db from '../../../database/db.js';
 import { tickets } from '../../../database/schema.js';
 import { eq, and } from 'drizzle-orm';
@@ -9,7 +10,7 @@ const TICKET_CATEGORY_ID = config.channels.ticketCategory;
 const SUPPORT_ROLE_ID = config.roles.support;
 
 export class TicketService {
-    async createTicket(user: User, guild: Guild): Promise<TextChannel | null> {
+    async createTicket(user: User, guild: Guild, option: TicketOptionConfig, modalData: { question: string, answer: string }[]): Promise<TextChannel | null> {
         // Check if user already has a ticket
         const existingTicket = await db.select()
             .from(tickets)
@@ -21,29 +22,44 @@ export class TicketService {
         }
 
         try {
-            const channelName = `ticket-${user.username.substring(0, 10)}`;
+            const channelName = `${option.channelPrefix}${user.username.substring(0, 10)}`;
+
+            const permissionOverwrites: any[] = [
+                {
+                    id: guild.id,
+                    type: OverwriteType.Role,
+                    deny: [PermissionFlagsBits.ViewChannel]
+                },
+                {
+                    id: user.id,
+                    type: OverwriteType.Member,
+                    allow: [PermissionFlagsBits.ViewChannel, PermissionFlagsBits.SendMessages, PermissionFlagsBits.AttachFiles]
+                },
+                {
+                    id: guild.client.user!.id,
+                    type: OverwriteType.Member,
+                    allow: [PermissionFlagsBits.ViewChannel, PermissionFlagsBits.SendMessages]
+                }
+            ];
+
+            // Add admin roles
+            if (option.adminRoles) {
+                for (const roleId of option.adminRoles) {
+                    if (roleId) {
+                        permissionOverwrites.push({
+                            id: roleId,
+                            type: OverwriteType.Role,
+                            allow: [PermissionFlagsBits.ViewChannel, PermissionFlagsBits.SendMessages]
+                        });
+                    }
+                }
+            }
+
             const channel = await guild.channels.create({
                 name: channelName,
                 type: ChannelType.GuildText,
-                parent: TICKET_CATEGORY_ID || undefined,
-                permissionOverwrites: [
-                    {
-                        id: guild.id,
-                        deny: [PermissionFlagsBits.ViewChannel]
-                    },
-                    {
-                        id: user.id,
-                        allow: [PermissionFlagsBits.ViewChannel, PermissionFlagsBits.SendMessages, PermissionFlagsBits.AttachFiles]
-                    },
-                    {
-                        id: SUPPORT_ROLE_ID || guild.roles.everyone.id,
-                        allow: [PermissionFlagsBits.ViewChannel, PermissionFlagsBits.SendMessages]
-                    },
-                    {
-                        id: guild.client.user!.id,
-                        allow: [PermissionFlagsBits.ViewChannel, PermissionFlagsBits.SendMessages]
-                    }
-                ]
+                parent: option.categoryId || undefined,
+                permissionOverwrites: permissionOverwrites
             });
 
             await db.insert(tickets).values({
@@ -53,10 +69,17 @@ export class TicketService {
             });
 
             const embed = createEmbed(
-                `Ticket de ${user.username}`,
-                "Un miembro del equipo de soporte te atenderá pronto.\nPara cerrar el ticket, pulsa el botón de abajo.",
+                option.openMessage || `Ticket de ${user.username}`,
+                option.ticketWelcomeMessage + "\n\n" + modalData.map(d => `**${d.question}**\n${d.answer}`).join("\n\n"),
                 Colors.Info
             );
+
+            if (option.thumbnailUrl) {
+                embed.setThumbnail(option.thumbnailUrl);
+            }
+            if (option.imageUrl) {
+                embed.setImage(option.imageUrl);
+            }
 
             const row = new ActionRowBuilder<ButtonBuilder>()
                 .addComponents(
@@ -67,7 +90,28 @@ export class TicketService {
                         .setEmoji('🔒')
                 );
 
-            await channel.send({ content: `<@${user.id}> Bienvenido.`, embeds: [embed], components: [row] });
+            let content = `<@${user.id}>`;
+
+            if (option.pingHere) content += " @here";
+            if (option.pingEveryone) content += " @everyone";
+            if (option.pingCustomRoleId) {
+                content += ` <@&${option.pingCustomRoleId}>`;
+            }
+
+            await channel.send({ content: content, embeds: [embed], components: [row] });
+
+            if (option.enableDmOnOpen) {
+                try {
+                    const dmEmbed = createEmbed(
+                        "Ticket Created",
+                        `Your ticket has been created in **${guild.name}**.\nChannel: ${channel.toString()}`,
+                        Colors.Success
+                    );
+                    await user.send({ embeds: [dmEmbed] });
+                } catch (err) {
+                    // Ignore if DMs are closed
+                }
+            }
 
             return channel;
         } catch (error) {
