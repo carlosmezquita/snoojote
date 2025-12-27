@@ -7,6 +7,7 @@ export const tickets = sqliteTable('tickets', {
     userId: text('user_id').notNull(),
     status: text('status').default('open').notNull(),
     createdAt: integer('created_at', { mode: 'timestamp' }).default(sql`(CURRENT_TIMESTAMP)`).notNull(),
+    firstResponseAt: integer('first_response_at', { mode: 'timestamp' }),
 });
 
 export const streaks = sqliteTable('streaks', {

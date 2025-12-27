@@ -25,6 +25,12 @@ export const execute = async (interaction: ChatInputCommandInteraction, client: 
         .setDescription(description)
         .setColor(mainTicketPanel.color);
 
+    if (interaction.guild) {
+        const responseTimeService = (await import('../services/responseTimeService.js')).default;
+        const estimate = await responseTimeService.getEstimatedWaitTime(interaction.guild);
+        embed.addFields({ name: '⏱️ Estimated Response Time', value: estimate, inline: false });
+    }
+
     if (mainTicketPanel.footerText) {
         embed.setFooter({ text: mainTicketPanel.footerText, iconURL: mainTicketPanel.footerIconUrl });
     }

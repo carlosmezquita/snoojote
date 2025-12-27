@@ -68,9 +68,14 @@ export class TicketService {
                 status: 'open'
             });
 
+            const responseTimeService = (await import('./responseTimeService.js')).default;
+            const estimate = await responseTimeService.getEstimatedWaitTime(guild);
+
             const embed = createEmbed(
                 option.openMessage || `Ticket de ${user.username}`,
-                option.ticketWelcomeMessage + "\n\n" + modalData.map(d => `**${d.question}**\n${d.answer}`).join("\n\n"),
+                option.ticketWelcomeMessage + "\n\n" +
+                `**⏱️ Estimated Response Time:** ${estimate}\n\n` +
+                modalData.map(d => `**${d.question}**\n${d.answer}`).join("\n\n"),
                 Colors.Info
             );
 
