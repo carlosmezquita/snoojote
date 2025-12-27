@@ -1,0 +1,10 @@
+import { Events, MessageReaction, User } from 'discord.js';
+import { StarboardService } from '../services/StarboardService.js';
+
+
+export const name = Events.MessageReactionRemove;
+
+export const execute = async (reaction: MessageReaction, user: User) => {
+    if (user.bot) return;
+    await StarboardService.handleReactionUpdate(reaction.message as any);
+};

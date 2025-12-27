@@ -23,3 +23,10 @@ export const users = sqliteTable('users', {
     xp: integer('xp').default(0).notNull(),
     level: integer('level').default(1).notNull(),
 });
+
+export const starboardMessages = sqliteTable('starboard_messages', {
+    id: integer('id').primaryKey({ autoIncrement: true }),
+    originalMessageId: text('original_message_id').notNull(),
+    originalChannelId: text('original_channel_id').notNull(),
+    starboardMessageId: text('starboard_message_id'),
+});

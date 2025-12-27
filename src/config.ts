@@ -11,7 +11,8 @@ export const config = {
         logs: "1444501792497991781",
         welcome: "1118642257365585942",
         verifierCategory: "1444496878925381758",
-        ticketCategory: "1118644187181633707"
+        ticketCategory: "1118644187181633707",
+        starboard: "1454616842101461206"
     },
     roles: {
         dailyPing: "1118644939899817994",
@@ -23,5 +24,9 @@ export const config = {
     },
     links: {
         whitelist: ["https://tenor.com/view/", "https://media.discordapp.net/", "https://cdn.discordapp.com/"]
+    },
+    starboard: {
+        emojis: ["🤡", "⭐"],
+        minReactions: 3
     }
 };
