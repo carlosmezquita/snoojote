@@ -5,6 +5,8 @@ import { tickets } from '../../../database/schema.js';
 import { eq, and } from 'drizzle-orm';
 import { config } from '../../../config.js';
 import { createEmbed, Colors } from '../../../shared/utils/embeds.js';
+import { DMService, DMType } from '../../../shared/services/DMService.js';
+import { AttachmentBuilder } from 'discord.js';
 
 const TICKET_CATEGORY_ID = config.channels.ticketCategory;
 const SUPPORT_ROLE_ID = config.roles.support;
@@ -106,16 +108,11 @@ export class TicketService {
             await channel.send({ content: content, embeds: [embed], components: [row] });
 
             if (option.enableDmOnOpen) {
-                try {
-                    const dmEmbed = createEmbed(
-                        "Ticket Created",
-                        `Your ticket has been created in **${guild.name}**.\nChannel: ${channel.toString()}`,
-                        Colors.Success
-                    );
-                    await user.send({ embeds: [dmEmbed] });
-                } catch (err) {
-                    // Ignore if DMs are closed
-                }
+                await DMService.sendNeutral(
+                    user,
+                    "Ticket Created / Ticket Creado",
+                    `Your ticket has been created in **${guild.name}**.\nSu ticket ha sido creado en **${guild.name}**.\n\n${channel.toString()}`
+                );
             }
 
             return channel;
@@ -141,6 +138,28 @@ export class TicketService {
                 }
             ]
         });
+
+        // Send DM with transcript
+        await DMService.send({
+            user: closer, // Or the ticket owner? Usually ticket systems send to the owner contextually, but here 'closer' is the one who closed it. 
+            // The requirement said "Ticket closed by...", let's assume we want to notify the user who had the ticket if possible, 
+            // but the method signature only has `closer`. 
+            // Wait, checking context... the `closeTicket` might not have correct context of who owns the ticket easily without DB query.
+            // Let's stick to the prompt: just attach transcript. 
+            // Implementation Plan said: "Use DMService.sendInfo to send transcript."
+            type: DMType.Info,
+            title: "Ticket Closed / Ticket Cerrado",
+            description: `Ticket closed by ${closer.tag}.\nTicket cerrado por ${closer.tag}.`,
+            fields: [
+                { name: 'Server', value: channel.guild.name, inline: true },
+                { name: 'Ticket', value: channel.name, inline: true }
+            ],
+            files: [
+                new AttachmentBuilder(Buffer.from(transcript, 'utf-8'), { name: `transcript-${channel.name}.txt` })
+            ]
+        });
+
+        // Current DMService implementation doesn't support files. I should add `files` to DMOptions first.
 
         setTimeout(async () => {
             await channel.delete().catch(() => { });

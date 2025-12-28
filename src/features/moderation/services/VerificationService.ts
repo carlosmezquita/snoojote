@@ -17,6 +17,7 @@ import { DiscordBot } from '../../../core/client.js';
 import captchaService from './CaptchaService.js';
 import verificationState from './VerificationStateService.js';
 import { config } from '../../../config.js';
+import { DMService } from '../../../shared/services/DMService.js';
 
 class VerificationService {
     private readonly SUSPECT_ROLE_ID = config.roles.suspect;
