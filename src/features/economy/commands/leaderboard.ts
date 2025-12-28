@@ -11,14 +11,14 @@ export const execute = async (interaction: ChatInputCommandInteraction, client: 
 
     const embed = new EmbedBuilder()
         .setColor(0xFFD700)
-        .setTitle('🏆 Leaderboard')
+        .setTitle('🏆 Richest Users (Pesetas)')
         .setTimestamp();
 
     let description = '';
     for (const [index, entry] of leaderboard.entries()) {
         const user = await client.users.fetch(entry.user_id).catch(() => null);
         const username = user ? user.username : 'Unknown User';
-        description += `${index + 1}. **${username}** - ${entry.points} points\n`;
+        description += `${index + 1}. **${username}** - ${entry.points} ₧\n`;
     }
 
     if (description === '') {

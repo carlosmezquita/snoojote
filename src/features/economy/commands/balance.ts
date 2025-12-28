@@ -16,10 +16,10 @@ export const execute = async (interaction: ChatInputCommandInteraction, client: 
     const balance = await economyService.getBalance(target.id);
 
     const embed = createEmbed(
-        `${target.username}'s Balance`,
-        `💰 **${balance}** points`,
+        `${target.username}'s Wallet`,
+        `💰 **${balance}** ₧ (Pesetas)`,
         Colors.Success
     ).setTimestamp();
 
-    await interaction.reply({ embeds: [embed] });
+    await interaction.reply({ embeds: [embed], ephemeral: true });
 };

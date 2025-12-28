@@ -34,8 +34,8 @@ export const execute = async (interaction: ChatInputCommandInteraction, client: 
     const success = await economyService.transfer(interaction.user.id, target.id, amount);
 
     if (success) {
-        await interaction.reply(`✅ Successfully transferred **${amount}** points to ${target.toString()}.`);
+        await interaction.reply(`✅ Successfully transferred **${amount}** ₧ to ${target.toString()}.`);
     } else {
-        await interaction.reply({ content: '❌ You do not have enough points.', ephemeral: true });
+        await interaction.reply({ content: '❌ You do not have enough pesetas.', ephemeral: true });
     }
 };
