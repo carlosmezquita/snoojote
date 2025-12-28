@@ -122,6 +122,8 @@ class VerificationService {
             await interaction.reply({ content: "✅ **Verificado / Verified.**", ephemeral: true });
             await this.sendLog(interaction.guild, `🟢 **Verificación Exitosa:** <@${userId}>`, client);
 
+            client.emit('guildMemberVerified', interaction.member as GuildMember);
+
             setTimeout(() => interaction.channel?.delete().catch(() => { }), 3000);
         } catch (err) {
             await interaction.reply({ content: "Error de permisos.", ephemeral: true });

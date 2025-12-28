@@ -5,7 +5,7 @@ import { config } from '../../../config.js';
 
 const WELCOME_CHANNEL_ID = config.channels.welcome;
 
-export const name = Events.GuildMemberAdd;
+export const name = 'guildMemberVerified';
 export const once = false;
 
 export const execute = async (member: GuildMember, client: DiscordBot) => {

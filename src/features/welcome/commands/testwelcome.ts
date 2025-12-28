@@ -10,6 +10,13 @@ export async function execute(interaction: ChatInputCommandInteraction) {
 
     const username = interaction.user.username.replace(/_/g, "\\_");
 
+    // Emit the custom event to simulate a verified member (testing the channel welcome)
+    const member = interaction.member;
+    if (member) {
+        interaction.client.emit('guildMemberVerified', member);
+    }
+
+    // Original DM logic kept for reference or direct testing
     const sent = await DMService.sendGift(
         interaction.user,
         "Welcome to r/Spain!",

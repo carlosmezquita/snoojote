@@ -27,7 +27,10 @@ export const execute = async (member: GuildMember, client: DiscordBot) => {
     client.logger.info(`   -> Invite used: ${usedInvite ? usedInvite.code : "Unknown"}`);
 
     const accountAgeMs = Date.now() - member.user.createdTimestamp;
-    if (accountAgeMs > THREE_MONTHS_MS) return;
+    if (accountAgeMs > THREE_MONTHS_MS) {
+        client.emit('guildMemberVerified', member);
+        return;
+    }
 
     client.logger.warn(`   -> 🚨 TRAP TRIGGERED for ${member.user.tag}`);
 
