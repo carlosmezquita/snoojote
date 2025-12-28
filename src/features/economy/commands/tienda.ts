@@ -13,25 +13,24 @@ export const execute = async (interaction: ChatInputCommandInteraction, client: 
 
     const items = await shopService.getShopItems();
 
+    // Matching the style of /comprar as requested
     const embed = new EmbedBuilder()
-        .setTitle('🏰 Tienda de Historia Española')
-        .setDescription('Compra títulos y objetos históricos con tus Pesetas (₧).')
-        .setColor(Colors.Gold)
-        .setThumbnail('https://i.imgur.com/example.png'); // You might want a real image later
+        .setTitle('🛒 Comprar Artículos')
+        .setDescription('Selecciona un artículo del menú `/comprar [rango]` para adquirirlo.')
+        .setColor(Colors.Gold);
 
     if (items.length === 0) {
-        embed.setDescription('La tienda está vacía por ahora.');
+        embed.setDescription('La tienda está vacía.');
     } else {
         const fields = items.map(item => {
-            const typeEmoji = item.type === 'ROLE' ? '👑' : '📦';
+            const typeEmoji = item.emoji ? item.emoji : (item.type === 'ROLE' ? '👑' : '📦');
             return {
-                name: `${typeEmoji} ${item.name} (ID: ${item.id})`,
-                value: `**${item.price} ₧**\n*${item.description}*`,
+                name: `${typeEmoji} ${item.name}`,
+                value: `**${item.price} ₧**\n${item.description}`,
                 inline: true
             };
         });
         embed.addFields(fields);
-        embed.setFooter({ text: 'Usa /comprar <id> para adquirir un artículo.' });
     }
 
     await interaction.reply({ embeds: [embed], ephemeral: true });

@@ -40,6 +40,7 @@ export const shopItems = sqliteTable('shop_items', {
     price: integer('price').notNull(),
     type: text('type').notNull(), // 'ROLE' or 'COLLECTIBLE'
     value: text('value').notNull(), // Role ID or Image URL
+    emoji: text('emoji'), // Display Emoji
 });
 
 export const userInventory = sqliteTable('user_inventory', {

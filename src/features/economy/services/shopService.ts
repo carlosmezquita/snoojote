@@ -1,13 +1,14 @@
 import db from '../../../database/db.js';
 import { shopItems, userInventory } from '../../../database/schema.js';
-import { eq, and } from 'drizzle-orm';
+import { eq, and, asc } from 'drizzle-orm';
 import economyService from './economyService.js';
 import { ChatInputCommandInteraction } from 'discord.js';
 import { shopCatalog } from '../shopConfig.js';
 
 export class ShopService {
     async getShopItems() {
-        return await db.select().from(shopItems);
+        // Updated to sort by price ascending
+        return await db.select().from(shopItems).orderBy(asc(shopItems.price));
     }
 
     async getItem(itemId: number) {
@@ -97,19 +98,32 @@ export class ShopService {
 
     async seedItems() {
         // Sync DB with Config
+        const configNames = shopCatalog.map(i => i.name);
+
+        // 1. Delete items not in config
+        const dbItems = await db.select().from(shopItems);
+        for (const dbItem of dbItems) {
+            if (!configNames.includes(dbItem.name)) {
+                await db.delete(shopItems).where(eq(shopItems.id, dbItem.id));
+                console.log(`[Shop] Removed obsolete item: ${dbItem.name}`);
+            }
+        }
+
+        // 2. Upsert items from config
         for (const configItem of shopCatalog) {
             // Check if exists by name
             const existing = await db.select().from(shopItems).where(eq(shopItems.name, configItem.name)).get();
 
             if (existing) {
-                // Update properties if changed (price, description, value)
-                if (existing.price !== configItem.price || existing.value !== configItem.value) {
+                // Update properties if changed (price, description, value, emoji)
+                if (existing.price !== configItem.price || existing.value !== configItem.value || existing.emoji !== configItem.emoji) {
                     await db.update(shopItems)
                         .set({
                             description: configItem.description,
                             price: configItem.price,
                             type: configItem.type,
-                            value: configItem.value
+                            value: configItem.value,
+                            emoji: configItem.emoji
                         })
                         .where(eq(shopItems.id, existing.id));
                 }
