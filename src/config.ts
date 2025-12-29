@@ -13,8 +13,8 @@ export const config = {
         verifierCategory: "1444496878925381758",
         ticketCategory: "1118644187181633707",
         starboard: "1454616842101461206",
-        aaai: "667732295842529291",
-        ai: "1454645774657781872"
+        ai: "1454645774657781872",
+        wordOfTheDay: "1118642257814360107"
     },
     roles: {
         dailyPing: "1118644939899817994",
