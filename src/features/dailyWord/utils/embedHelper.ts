@@ -8,7 +8,7 @@ interface EmbedOptions {
 export const createRaeEmbed = (word: string, definitionData: WordEntryData, options: EmbedOptions = {}): EmbedBuilder => {
     const embed = new EmbedBuilder()
         .setTitle(word)
-        .setURL(`https://dle.rae.es/${encodeURIComponent(word)}`)
+        .setURL(`https://dle.rae.es/${encodeURIComponent(word)}${options.isDailyWord ? '?m=wotd2' : ''}`)
         .setColor(options.isDailyWord ? '#00b4d8' : '#caf0f8')
         .setFooter({
             iconURL: "https://dle.rae.es/assets/images/dle.jpg",
