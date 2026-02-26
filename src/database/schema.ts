@@ -1,4 +1,4 @@
-import { sqliteTable, integer, text } from 'drizzle-orm/sqlite-core';
+import { sqliteTable, integer, text, index } from 'drizzle-orm/sqlite-core';
 import { sql } from 'drizzle-orm';
 
 export const tickets = sqliteTable('tickets', {
@@ -8,7 +8,12 @@ export const tickets = sqliteTable('tickets', {
     status: text('status').default('open').notNull(),
     createdAt: integer('created_at', { mode: 'timestamp' }).default(sql`(CURRENT_TIMESTAMP)`).notNull(),
     firstResponseAt: integer('first_response_at', { mode: 'timestamp' }),
-});
+}, (table) => ({
+    // Optimizes ticket closure and lookup by channel
+    channelIdIdx: index('tickets_channel_id_idx').on(table.channelId),
+    // Optimizes finding open tickets for a user
+    userStatusIdx: index('tickets_user_status_idx').on(table.userId, table.status),
+}));
 
 export const streaks = sqliteTable('streaks', {
     userId: text('user_id').primaryKey(),
@@ -31,7 +36,10 @@ export const starboardMessages = sqliteTable('starboard_messages', {
     originalMessageId: text('original_message_id').notNull(),
     originalChannelId: text('original_channel_id').notNull(),
     starboardMessageId: text('starboard_message_id'),
-});
+}, (table) => ({
+    // Optimizes checking if a message is already on the starboard
+    originalMessageIdIdx: index('starboard_original_message_id_idx').on(table.originalMessageId),
+}));
 
 export const shopItems = sqliteTable('shop_items', {
     id: integer('id').primaryKey({ autoIncrement: true }),
@@ -48,4 +56,7 @@ export const userInventory = sqliteTable('user_inventory', {
     userId: text('user_id').notNull(),
     itemId: integer('item_id').references(() => shopItems.id).notNull(),
     acquiredAt: integer('acquired_at', { mode: 'timestamp' }).default(sql`(CURRENT_TIMESTAMP)`).notNull(),
-});
+}, (table) => ({
+    // Optimizes checking if a user owns a specific item
+    userItemIdx: index('inventory_user_item_idx').on(table.userId, table.itemId),
+}));
