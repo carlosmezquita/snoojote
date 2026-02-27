@@ -1,232 +1,204 @@
 /**
- * Wait Time Estimator — Kernel-based weighted estimation algorithm.
+ * Wait Time Estimator — Hybrid Empirical-Load Algorithm.
  *
- * Uses non-parametric kernel regression over historical ticket data to
- * produce accurate wait-time estimates. Each historical data point is
- * weighted by its similarity to the current context across multiple
- * dimensions:
+ * Combines an Exponential Moving Average for real-time system turbulence,
+ * a Temporal Baseline for seasonality (day/time), and a Load Factor
+ * derived from Little's Law to account for queue and staff availability.
  *
- *   1. Hour of day   (cyclical Gaussian kernel, σ = 3 h)
- *   2. Day of week   (cyclical Gaussian kernel, σ = 1.5 d)
- *   3. Month of year (cyclical Gaussian kernel, σ = 2 mo)
- *   4. Recency        (exponential decay, half-life ≈ 60 days)
+ * Formula:
+ *   W_est = (α · M_recent + (1 - α) · H_{d,h}) × L(Q, S)
  *
- * After computing the weighted mean of historical response times the
- * result is adjusted by two real-time factors:
+ * Where:
+ *   M_recent — Median response time of the last N answered tickets
+ *   H_{d,h}  — Historical median for current day-of-week + 4-hour block
+ *   α        — Recency weight (0.6 if recent data < 24h, 0.2 if stale)
+ *   L(Q, S)  — Little's Law load factor: (Q + 1) / max(S, ε)
+ *   Q        — Open tickets with no staff response yet
+ *   S        — Active staff (online, dnd, or idle)
+ *   ε        — 0.25 (prevents division by zero, models "waiting for login")
  *
- *   • Staff availability  – fewer online staff → longer wait
- *   • Queue depth         – more open tickets  → longer wait
- *
- * Exported functions are pure (no side-effects, no DB access) so they
- * can be tested independently.
+ * All exported functions are pure (no side-effects, no DB access) so
+ * they can be tested independently.
  */
 
 // ---------------------------------------------------------------------------
 // Types
 // ---------------------------------------------------------------------------
 
-export interface HistoricalTicket {
+export interface TicketResponseData {
     createdAt: Date;
     firstResponseAt: Date;
-    staffOnlineAtCreation?: number | null;
-    openTicketsAtCreation?: number | null;
-}
-
-export interface EstimationContext {
-    now: Date;
-    onlineStaff: number;
-    openTickets: number;
 }
 
 // ---------------------------------------------------------------------------
-// Kernel bandwidth parameters
+// Constants
 // ---------------------------------------------------------------------------
 
-/** Standard deviation for hour-of-day kernel (hours). */
-const HOUR_SIGMA = 3;
+/** Recency weight when fresh data exists (most recent ticket < 24h old). */
+const ALPHA_FRESH = 0.6;
 
-/** Standard deviation for day-of-week kernel (days). */
-const DAY_SIGMA = 1.5;
+/** Recency weight when data is stale (most recent ticket ≥ 24h old). */
+const ALPHA_STALE = 0.2;
 
-/** Standard deviation for month-of-year kernel (months). */
-const MONTH_SIGMA = 2;
+/** Minimum active staff denominator — prevents division by zero and models
+ *  the "waiting for someone to log in" delay (1 / 0.25 = 4× multiplier). */
+const EPSILON = 0.25;
 
-/** Decay constant for recency kernel (days). ln(2)/λ ≈ half-life of 60 days. */
-const RECENCY_LAMBDA = 90;
+/** Fallback base time (ms) when no historical data exists at all. */
+const FALLBACK_BASE_MS = 15 * 60 * 1000; // 15 minutes
 
-/** Minimum total weight required to trust the kernel estimate. */
-const MIN_TOTAL_WEIGHT = 0.5;
+/** Minimum number of time-block tickets before trusting H_{d,h}. */
+const MIN_TEMPORAL_TICKETS = 5;
 
-/** Minimum number of historical tickets for kernel estimation. */
-const MIN_TICKETS = 5;
+/** Minimum output clamp (ms). */
+const MIN_ESTIMATE_MS = 60 * 1000; // 1 minute
+
+/** Maximum output clamp (ms). */
+const MAX_ESTIMATE_MS = 24 * 60 * 60 * 1000; // 24 hours
 
 // ---------------------------------------------------------------------------
 // Pure helper functions
 // ---------------------------------------------------------------------------
 
 /**
- * Cyclical (wrapped) distance between two values on a circle of `period`.
- * E.g. cyclicalDistance(23, 1, 24) → 2  (not 22).
+ * Compute the median of a sorted-in-place array of numbers.
+ * Returns 0 for empty arrays.
  */
-export function cyclicalDistance(a: number, b: number, period: number): number {
-    const diff = Math.abs(a - b);
-    return Math.min(diff, period - diff);
+export function computeMedian(values: number[]): number {
+    if (values.length === 0) return 0;
+    values.sort((a, b) => a - b);
+    const mid = Math.floor(values.length / 2);
+    if (values.length % 2 === 1) return values[mid];
+    return (values[mid - 1] + values[mid]) / 2;
 }
 
 /**
- * Gaussian kernel: exp(-d² / (2σ²)).
+ * Map an hour (0–23) to a 4-hour time block (0–5).
+ *   Block 0: 00:00–03:59
+ *   Block 1: 04:00–07:59
+ *   Block 2: 08:00–11:59
+ *   Block 3: 12:00–15:59
+ *   Block 4: 16:00–19:59
+ *   Block 5: 20:00–23:59
  */
-export function gaussianKernel(distance: number, sigma: number): number {
-    return Math.exp(-(distance * distance) / (2 * sigma * sigma));
+export function getTimeBlock(hour: number): number {
+    return Math.floor(hour / 4);
 }
 
 /**
- * Exponential decay kernel: exp(-ageDays / λ).
+ * Extract positive response times (firstResponseAt − createdAt) in ms.
+ * Skips invalid / negative values.
  */
-export function recencyKernel(ageDays: number, lambda: number): number {
-    return Math.exp(-ageDays / lambda);
-}
-
-/**
- * Compute the composite weight for a single historical ticket relative to
- * the current context.
- */
-export function computeWeight(
-    ticket: HistoricalTicket,
-    ctx: EstimationContext,
-): number {
-    const ticketDate = ticket.createdAt;
-    const nowDate = ctx.now;
-
-    // Temporal features
-    const hourDist = cyclicalDistance(nowDate.getUTCHours(), ticketDate.getUTCHours(), 24);
-    const dayDist = cyclicalDistance(nowDate.getUTCDay(), ticketDate.getUTCDay(), 7);
-    const monthDist = cyclicalDistance(nowDate.getUTCMonth(), ticketDate.getUTCMonth(), 12);
-
-    const wHour = gaussianKernel(hourDist, HOUR_SIGMA);
-    const wDay = gaussianKernel(dayDist, DAY_SIGMA);
-    const wMonth = gaussianKernel(monthDist, MONTH_SIGMA);
-
-    // Recency
-    const ageDays = (nowDate.getTime() - ticketDate.getTime()) / (1000 * 60 * 60 * 24);
-    const wRecency = recencyKernel(Math.max(ageDays, 0), RECENCY_LAMBDA);
-
-    return wHour * wDay * wMonth * wRecency;
-}
-
-/**
- * Compute the staff-availability adjustment factor.
- *
- * When historical tickets recorded their staff count we can compare
- * current availability to the historical median.  Otherwise we fall
- * back to a simpler heuristic: more staff online → shorter wait.
- */
-export function staffAdjustmentFactor(
-    historicalTickets: HistoricalTicket[],
-    currentOnlineStaff: number,
-): number {
-    // Collect recorded staff counts
-    const staffCounts = historicalTickets
-        .map(t => t.staffOnlineAtCreation)
-        .filter((v): v is number => v != null && v > 0);
-
-    if (staffCounts.length >= MIN_TICKETS) {
-        // Use median historical staff count as baseline
-        staffCounts.sort((a, b) => a - b);
-        const median = staffCounts[Math.floor(staffCounts.length / 2)];
-        // Ratio: if current staff < median → factor > 1 (longer wait)
-        return median / Math.max(currentOnlineStaff, 1);
+export function extractResponseTimes(tickets: TicketResponseData[]): number[] {
+    const times: number[] = [];
+    for (const t of tickets) {
+        const diff = t.firstResponseAt.getTime() - t.createdAt.getTime();
+        if (diff > 0) times.push(diff);
     }
-
-    // Fallback: no historical staff data yet.
-    // Use a softer heuristic — each additional online staff member reduces
-    // the estimate (diminishing returns via square-root scaling).
-    return 1 / Math.sqrt(Math.max(currentOnlineStaff, 1));
+    return times;
 }
 
 /**
- * Compute the queue-depth adjustment factor.
- *
- * More open tickets at creation correlated with longer response times.
- * We compare the current queue depth against the historical median.
+ * Determine α based on whether the most recent ticket is within 24 hours.
  */
-export function queueAdjustmentFactor(
-    historicalTickets: HistoricalTicket[],
-    currentOpenTickets: number,
-): number {
-    const queueCounts = historicalTickets
-        .map(t => t.openTicketsAtCreation)
-        .filter((v): v is number => v != null && v >= 0);
+export function computeAlpha(mostRecentCreatedAt: Date | null, now: Date): number {
+    if (!mostRecentCreatedAt) return ALPHA_STALE;
+    const ageMs = now.getTime() - mostRecentCreatedAt.getTime();
+    const twentyFourHoursMs = 24 * 60 * 60 * 1000;
+    return ageMs < twentyFourHoursMs ? ALPHA_FRESH : ALPHA_STALE;
+}
 
-    if (queueCounts.length >= MIN_TICKETS) {
-        queueCounts.sort((a, b) => a - b);
-        const median = queueCounts[Math.floor(queueCounts.length / 2)];
-        // Linear scaling relative to median, clamped to reasonable bounds.
-        const ratio = (currentOpenTickets + 1) / (median + 1);
-        return Math.max(0.5, Math.min(ratio, 3));
-    }
-
-    // Fallback: slight linear increase per open ticket, capped.
-    return Math.max(1, Math.min(1 + currentOpenTickets * 0.15, 3));
+/**
+ * Little's Law load factor: L(Q, S) = (Q + 1) / max(S, ε).
+ *
+ * Q + 1 represents the new user's position in the unanswered queue.
+ * When S = 0, the denominator is ε = 0.25, producing a 4× multiplier
+ * per queued ticket — modelling the heavy delay of waiting for someone
+ * to come online.
+ */
+export function computeLoadFactor(queueLength: number, activeStaff: number): number {
+    return (queueLength + 1) / Math.max(activeStaff, EPSILON);
 }
 
 // ---------------------------------------------------------------------------
 // Main estimation
 // ---------------------------------------------------------------------------
 
+export interface EstimationInput {
+    /** Last N (up to 10) answered tickets, ordered by createdAt DESC. */
+    recentTickets: TicketResponseData[];
+    /** All answered tickets matching current day-of-week + time block (last 60 days). */
+    temporalTickets: TicketResponseData[];
+    /** All answered tickets (fallback for temporal baseline). */
+    allTickets: TicketResponseData[];
+    /** Current timestamp. */
+    now: Date;
+    /** Number of open tickets with no first response. */
+    queueLength: number;
+    /** Number of active staff (online / dnd / idle). */
+    activeStaff: number;
+}
+
 /**
  * Estimate the wait time (in milliseconds) for a new ticket.
  *
- * Returns `null` when there is not enough historical data.
+ * Implements: W_est = (α · M_recent + (1 − α) · H_{d,h}) × L(Q, S)
+ *
+ * Returns the clamped estimate in milliseconds.
  */
-export function estimateWaitTimeMs(
-    historicalTickets: HistoricalTicket[],
-    ctx: EstimationContext,
-): number | null {
-    if (historicalTickets.length < MIN_TICKETS) {
-        return null;
+export function estimateWaitTimeMs(input: EstimationInput): number {
+    const { recentTickets, temporalTickets, allTickets, now, queueLength, activeStaff } = input;
+
+    const loadFactor = computeLoadFactor(queueLength, activeStaff);
+
+    // --- Zero-data fallback ---
+    const recentTimes = extractResponseTimes(recentTickets);
+    const allTimes = extractResponseTimes(allTickets);
+
+    if (recentTimes.length === 0 && allTimes.length === 0) {
+        return clamp(FALLBACK_BASE_MS * loadFactor);
     }
 
-    // 1. Compute kernel-weighted mean of historical response times.
-    let weightedSum = 0;
-    let totalWeight = 0;
+    // --- M_recent (median of last N answered tickets) ---
+    const mRecent = recentTimes.length > 0 ? computeMedian(recentTimes) : null;
 
-    for (const ticket of historicalTickets) {
-        const responseMs = ticket.firstResponseAt.getTime() - ticket.createdAt.getTime();
-        if (responseMs <= 0) continue; // skip bad data
+    // --- H_{d,h} (historical temporal baseline) ---
+    const temporalTimes = extractResponseTimes(temporalTickets);
+    let hDH: number | null = null;
 
-        const w = computeWeight(ticket, ctx);
-        weightedSum += w * responseMs;
-        totalWeight += w;
+    if (temporalTimes.length >= MIN_TEMPORAL_TICKETS) {
+        hDH = computeMedian(temporalTimes);
+    } else if (allTimes.length > 0) {
+        // Fallback: global historical median
+        hDH = computeMedian(allTimes);
     }
 
-    if (totalWeight < MIN_TOTAL_WEIGHT) {
-        // Weights too small → fall back to simple average.
-        let sum = 0;
-        let count = 0;
-        for (const ticket of historicalTickets) {
-            const responseMs = ticket.firstResponseAt.getTime() - ticket.createdAt.getTime();
-            if (responseMs > 0) {
-                sum += responseMs;
-                count++;
-            }
-        }
-        if (count === 0) return null;
-        return sum / count;
+    // --- Compute base time ---
+    let baseTime: number;
+
+    if (mRecent !== null && hDH !== null) {
+        const alpha = computeAlpha(
+            recentTickets.length > 0 ? recentTickets[0].createdAt : null,
+            now,
+        );
+        baseTime = alpha * mRecent + (1 - alpha) * hDH;
+    } else if (mRecent !== null) {
+        baseTime = mRecent;
+    } else if (hDH !== null) {
+        baseTime = hDH;
+    } else {
+        baseTime = FALLBACK_BASE_MS;
     }
 
-    const baseEstimate = weightedSum / totalWeight;
+    // --- Apply load factor and clamp ---
+    return clamp(baseTime * loadFactor);
+}
 
-    // 2. Apply real-time adjustments.
-    const staffFactor = staffAdjustmentFactor(historicalTickets, ctx.onlineStaff);
-    const queueFactor = queueAdjustmentFactor(historicalTickets, ctx.openTickets);
-
-    const adjusted = baseEstimate * staffFactor * queueFactor;
-
-    // 3. Clamp to reasonable bounds (1 minute – 48 hours).
-    const ONE_MINUTE = 60 * 1000;
-    const FORTY_EIGHT_HOURS = 48 * 60 * 60 * 1000;
-    return Math.max(ONE_MINUTE, Math.min(adjusted, FORTY_EIGHT_HOURS));
+/**
+ * Clamp the estimate to [1 minute, 24 hours].
+ */
+function clamp(ms: number): number {
+    return Math.max(MIN_ESTIMATE_MS, Math.min(ms, MAX_ESTIMATE_MS));
 }
 
 // ---------------------------------------------------------------------------
@@ -235,8 +207,13 @@ export function estimateWaitTimeMs(
 
 /**
  * Human-readable duration string.
+ * At the 24-hour cap, displays "24+ hours" to manage expectations.
  */
 export function formatDuration(ms: number): string {
+    if (ms >= MAX_ESTIMATE_MS) {
+        return '24+ hours';
+    }
+
     const totalMinutes = Math.ceil(ms / (1000 * 60));
 
     if (totalMinutes < 60) {

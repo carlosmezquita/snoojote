@@ -1,14 +1,26 @@
 import { Guild } from 'discord.js';
 import db from '../../../database/db.js';
 import { tickets } from '../../../database/schema.js';
-import { desc, isNotNull, eq, count } from 'drizzle-orm';
+import { desc, isNotNull, eq, and, isNull, count, gte } from 'drizzle-orm';
 import { config } from '../../../config.js';
 import {
-    type HistoricalTicket,
-    type EstimationContext,
+    type TicketResponseData,
+    getTimeBlock,
     estimateWaitTimeMs,
     formatDuration,
 } from './waitTimeEstimator.js';
+
+// ---------------------------------------------------------------------------
+// In-memory cache for guild.members.fetch() — 5-minute TTL
+// ---------------------------------------------------------------------------
+
+interface StaffCacheEntry {
+    activeCount: number;
+    fetchedAt: number;
+}
+
+const STAFF_CACHE_TTL_MS = 5 * 60 * 1000; // 5 minutes
+const staffCache = new Map<string, StaffCacheEntry>();
 
 export class ResponseTimeService {
     /**
@@ -26,22 +38,61 @@ export class ResponseTimeService {
     }
 
     /**
-     * Counts the number of currently online support staff members.
+     * Fetches and counts active staff members (online, dnd, or idle)
+     * using guild.members.fetch() with a 5-minute in-memory cache to
+     * avoid Discord API rate-limits.
      */
-    getOnlineStaffCount(guild: Guild): number {
+    async getActiveStaffCount(guild: Guild): Promise<number> {
+        const cacheKey = guild.id;
+        const cached = staffCache.get(cacheKey);
+
+        if (cached && (Date.now() - cached.fetchedAt) < STAFF_CACHE_TTL_MS) {
+            return cached.activeCount;
+        }
+
         const supportRoleId = config.roles.support;
         if (!supportRoleId) return 0;
+
+        try {
+            // Fetch all members to ensure presence data is available.
+            // This is necessary because Discord.js v14 purges offline/inactive
+            // members from the cache.
+            await guild.members.fetch();
+        } catch {
+            // If fetch fails (rate-limit, permissions), fall back to cache
+        }
 
         const supportRole = guild.roles.cache.get(supportRoleId);
         if (!supportRole) return 0;
 
-        return supportRole.members.filter(member =>
-            member.presence?.status === 'online'
-        ).size;
+        const activeCount = supportRole.members.filter(member => {
+            const status = member.presence?.status;
+            return status === 'online' || status === 'dnd' || status === 'idle';
+        }).size;
+
+        staffCache.set(cacheKey, { activeCount, fetchedAt: Date.now() });
+        return activeCount;
     }
 
     /**
-     * Counts the number of currently open tickets.
+     * Counts the number of currently open tickets that have NOT yet
+     * received a staff response. This is the unanswered queue (Q).
+     */
+    async getUnansweredQueueLength(): Promise<number> {
+        const result = await db.select({ value: count() })
+            .from(tickets)
+            .where(and(
+                eq(tickets.status, 'open'),
+                isNull(tickets.firstResponseAt),
+            ))
+            .get();
+
+        return result?.value ?? 0;
+    }
+
+    /**
+     * Counts the number of currently open tickets (all, regardless of response).
+     * Used for recording context data at ticket creation.
      */
     async getOpenTicketCount(): Promise<number> {
         const result = await db.select({ value: count() })
@@ -53,58 +104,89 @@ export class ResponseTimeService {
     }
 
     /**
-     * Calculates the estimated wait time for a new ticket using
-     * kernel-based weighted estimation over historical data.
+     * Calculates the estimated wait time for a new ticket using the
+     * Hybrid Empirical-Load Algorithm.
      *
-     * Considers: hour of day, day of week, month/season, recency,
-     * staff availability, and current queue depth.
+     * Formula: W_est = (α · M_recent + (1 − α) · H_{d,h}) × L(Q, S)
+     *
+     * Considers: recent median, day-of-week + 4-hour time block seasonality,
+     * recency of data, queue depth (Little's Law), and active staff count.
      */
     async getEstimatedWaitTime(guild: Guild): Promise<string> {
-        // 1. Fetch historical tickets with recorded response times.
-        //    We use the last 200 responded tickets to give the kernel
-        //    enough data across different time patterns.
-        const historicalRows = await db.select({
+        const now = new Date();
+
+        // Step 2.1: M_recent — last 10 answered tickets
+        const recentRows = await db.select({
             createdAt: tickets.createdAt,
             firstResponseAt: tickets.firstResponseAt,
-            staffOnlineAtCreation: tickets.staffOnlineAtCreation,
-            openTicketsAtCreation: tickets.openTicketsAtCreation,
         })
             .from(tickets)
             .where(isNotNull(tickets.firstResponseAt))
             .orderBy(desc(tickets.createdAt))
-            .limit(200)
+            .limit(10)
             .all();
 
-        if (historicalRows.length === 0) {
-            return 'Unknown';
-        }
-
-        // Map DB rows to the estimator's interface.
-        const historicalTickets: HistoricalTicket[] = historicalRows
+        const recentTickets: TicketResponseData[] = recentRows
             .filter(r => r.firstResponseAt != null)
             .map(r => ({
                 createdAt: r.createdAt,
                 firstResponseAt: r.firstResponseAt!,
-                staffOnlineAtCreation: r.staffOnlineAtCreation,
-                openTicketsAtCreation: r.openTicketsAtCreation,
             }));
 
-        // 2. Build current context.
-        const onlineStaff = this.getOnlineStaffCount(guild);
-        const openTickets = await this.getOpenTicketCount();
+        // Step 2.2: H_{d,h} — temporal baseline (same day-of-week + 4-hour block, last 60 days)
+        const sixtyDaysAgo = new Date(now.getTime() - 60 * 24 * 60 * 60 * 1000);
+        const currentDay = now.getUTCDay();
+        const currentBlock = getTimeBlock(now.getUTCHours());
 
-        const ctx: EstimationContext = {
-            now: new Date(),
-            onlineStaff,
-            openTickets,
-        };
+        // Fetch all answered tickets from the last 60 days for temporal filtering
+        const historicalRows = await db.select({
+            createdAt: tickets.createdAt,
+            firstResponseAt: tickets.firstResponseAt,
+        })
+            .from(tickets)
+            .where(and(
+                isNotNull(tickets.firstResponseAt),
+                gte(tickets.createdAt, sixtyDaysAgo),
+            ))
+            .all();
 
-        // 3. Compute estimate.
-        const estimatedMs = estimateWaitTimeMs(historicalTickets, ctx);
+        // Filter in-app for matching day-of-week + time block
+        // (SQLite timestamp mode makes SQL-level day/hour extraction impractical)
+        const temporalTickets: TicketResponseData[] = historicalRows
+            .filter(r => {
+                if (!r.firstResponseAt) return false;
+                const d = r.createdAt;
+                return d.getUTCDay() === currentDay
+                    && getTimeBlock(d.getUTCHours()) === currentBlock;
+            })
+            .map(r => ({
+                createdAt: r.createdAt,
+                firstResponseAt: r.firstResponseAt!,
+            }));
 
-        if (estimatedMs === null) {
-            return 'Unknown';
-        }
+        // All answered tickets (for global median fallback)
+        const allTickets: TicketResponseData[] = historicalRows
+            .filter(r => r.firstResponseAt != null)
+            .map(r => ({
+                createdAt: r.createdAt,
+                firstResponseAt: r.firstResponseAt!,
+            }));
+
+        // Step 2.3: Q — unanswered queue length
+        const queueLength = await this.getUnansweredQueueLength();
+
+        // Step 2.4: S — active staff (with 5-minute fetch cache)
+        const activeStaff = await this.getActiveStaffCount(guild);
+
+        // Step 2.5: Apply the formula
+        const estimatedMs = estimateWaitTimeMs({
+            recentTickets,
+            temporalTickets,
+            allTickets,
+            now,
+            queueLength,
+            activeStaff,
+        });
 
         return formatDuration(estimatedMs);
     }

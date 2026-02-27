@@ -67,7 +67,7 @@ export class TicketService {
             const responseTimeService = (await import('./responseTimeService.js')).default;
 
             // Record context data for future estimation accuracy
-            const staffOnlineAtCreation = responseTimeService.getOnlineStaffCount(guild);
+            const staffOnlineAtCreation = await responseTimeService.getActiveStaffCount(guild);
             const openTicketsAtCreation = await responseTimeService.getOpenTicketCount();
 
             await db.insert(tickets).values({
