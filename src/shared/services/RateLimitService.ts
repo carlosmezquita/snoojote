@@ -6,9 +6,22 @@ interface RateLimitData {
 export class RateLimitService {
     private limits = new Map<string, RateLimitData>();
     private cooldownSecs: number;
+    private cleanupInterval: NodeJS.Timeout;
 
     constructor(cooldownSecs: number = 60) {
         this.cooldownSecs = cooldownSecs;
+
+        // Cleanup interval to remove expired entries every 30 seconds
+        this.cleanupInterval = setInterval(() => {
+            const now = Date.now();
+            const expirationTime = this.cooldownSecs * 1000;
+
+            for (const [key, data] of this.limits.entries()) {
+                if (now - data.firstSeen > expirationTime) {
+                    this.limits.delete(key);
+                }
+            }
+        }, 30000);
     }
 
     /**
@@ -22,12 +35,12 @@ export class RateLimitService {
 
         if (!data) {
             this.limits.set(key, { counter: 1, firstSeen: now });
+            return 1;
+        }
 
-            // Auto-cleanup
-            setTimeout(() => {
-                this.limits.delete(key);
-            }, this.cooldownSecs * 1000);
-
+        // If the entry exists but has expired (edge case if interval hasn't run yet), reset it
+        if (now - data.firstSeen > this.cooldownSecs * 1000) {
+            this.limits.set(key, { counter: 1, firstSeen: now });
             return 1;
         }
 
@@ -41,5 +54,12 @@ export class RateLimitService {
      */
     reset(key: string): void {
         this.limits.delete(key);
+    }
+
+    /**
+     * Stops the cleanup interval. Call this when the service is no longer needed.
+     */
+    dispose(): void {
+        clearInterval(this.cleanupInterval);
     }
 }

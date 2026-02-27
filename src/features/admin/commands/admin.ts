@@ -1,4 +1,4 @@
-import { SlashCommandBuilder, ChatInputCommandInteraction, PermissionsBitField } from 'discord.js';
+import { SlashCommandBuilder, ChatInputCommandInteraction, PermissionsBitField, GuildMember } from 'discord.js';
 import { DiscordBot } from '../../../core/client.js';
 import { config } from '../../../config.js';
 import { postDailyWord } from '../../dailyWord/events/dailyWord.js';
@@ -17,9 +17,19 @@ export const data = new SlashCommandBuilder()
     .setDefaultMemberPermissions(PermissionsBitField.Flags.Administrator);
 
 export const execute = async (interaction: ChatInputCommandInteraction, client: DiscordBot) => {
+    if (!interaction.inGuild()) {
+        await interaction.reply({
+            content: 'Este comando solo puede usarse en un servidor.',
+            ephemeral: true
+        });
+        return;
+    }
+
     // Check for admin roles (Mod or Support as defined in config)
-    const rolesCache = (interaction.member?.roles as any).cache;
-    const hasRole = rolesCache.has(config.roles.mod) || rolesCache.has(config.roles.support);
+    const member: GuildMember = interaction.member instanceof GuildMember
+        ? interaction.member
+        : await interaction.guild!.members.fetch(interaction.user.id);
+    const hasRole = member.roles.cache.has(config.roles.mod) || member.roles.cache.has(config.roles.support);
 
     if (!hasRole && !interaction.memberPermissions?.has(PermissionsBitField.Flags.Administrator)) {
         await interaction.reply({

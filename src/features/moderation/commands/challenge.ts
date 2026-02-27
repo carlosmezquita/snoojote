@@ -13,8 +13,19 @@ export const data = new SlashCommandBuilder()
     .setDefaultMemberPermissions(PermissionFlagsBits.ModerateMembers);
 
 export const execute = async (interaction: ChatInputCommandInteraction, client: DiscordBot) => {
+    if (!interaction.inGuild()) {
+        await interaction.reply({ content: 'This command can only be used in a server.', ephemeral: true });
+        return;
+    }
+
     const targetUser = interaction.options.getUser('user', true);
-    const member = await interaction.guild?.members.fetch(targetUser.id);
+
+    let member: GuildMember | undefined;
+    try {
+        member = await interaction.guild?.members.fetch(targetUser.id);
+    } catch (error) {
+        // Handle fetch error (e.g., user not found)
+    }
 
     if (!member) {
         await interaction.reply({ content: 'User not found in this guild.', ephemeral: true });

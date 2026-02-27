@@ -5,6 +5,10 @@ import * as schema from './schema.js';
 
 const dbPath = path.join(process.cwd(), 'data', 'database.sqlite');
 const sqlite = new Database(dbPath);
+
+// Enable Foreign Key support
+sqlite.pragma('foreign_keys = ON');
+
 const db = drizzle(sqlite, { schema });
 
 export default db;
