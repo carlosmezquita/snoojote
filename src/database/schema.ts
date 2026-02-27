@@ -8,6 +8,9 @@ export const tickets = sqliteTable('tickets', {
     status: text('status').default('open').notNull(),
     createdAt: integer('created_at', { mode: 'timestamp' }).default(sql`(CURRENT_TIMESTAMP)`).notNull(),
     firstResponseAt: integer('first_response_at', { mode: 'timestamp' }),
+    closedAt: integer('closed_at', { mode: 'timestamp' }),
+    staffOnlineAtCreation: integer('staff_online_at_creation'),
+    openTicketsAtCreation: integer('open_tickets_at_creation'),
 }, (table) => ({
     // Optimizes ticket closure and lookup by channel
     channelIdIdx: index('tickets_channel_id_idx').on(table.channelId),

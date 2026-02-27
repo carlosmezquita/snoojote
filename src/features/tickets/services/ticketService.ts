@@ -64,13 +64,20 @@ export class TicketService {
                 permissionOverwrites: permissionOverwrites
             });
 
+            const responseTimeService = (await import('./responseTimeService.js')).default;
+
+            // Record context data for future estimation accuracy
+            const staffOnlineAtCreation = responseTimeService.getOnlineStaffCount(guild);
+            const openTicketsAtCreation = await responseTimeService.getOpenTicketCount();
+
             await db.insert(tickets).values({
                 channelId: channel.id,
                 userId: user.id,
-                status: 'open'
+                status: 'open',
+                staffOnlineAtCreation,
+                openTicketsAtCreation,
             });
 
-            const responseTimeService = (await import('./responseTimeService.js')).default;
             const estimate = await responseTimeService.getEstimatedWaitTime(guild);
 
             const embed = createEmbed(
@@ -124,7 +131,7 @@ export class TicketService {
 
     async closeTicket(channel: TextChannel, closer: User): Promise<void> {
         await db.update(tickets)
-            .set({ status: 'closed' })
+            .set({ status: 'closed', closedAt: new Date() })
             .where(eq(tickets.channelId, channel.id));
 
         const transcript = await this.generateTranscript(channel);
