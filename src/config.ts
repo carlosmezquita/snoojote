@@ -1,28 +1,53 @@
 import 'dotenv/config';
+import { z } from 'zod';
+
+const envSchema = z.object({
+    DISCORD_CLIENT_ID: z.string().min(1, 'DISCORD_CLIENT_ID is required'),
+    DISCORD_GUILD_ID: z.string().min(1, 'DISCORD_GUILD_ID is required'),
+    CHANNEL_MAIN: z.string().min(1, 'CHANNEL_MAIN is required'),
+    CHANNEL_ALERTS: z.string().min(1, 'CHANNEL_ALERTS is required'),
+    CHANNEL_STREAKS: z.string().min(1, 'CHANNEL_STREAKS is required'),
+    CHANNEL_BOT: z.string().min(1, 'CHANNEL_BOT is required'),
+    CHANNEL_LOGS: z.string().min(1, 'CHANNEL_LOGS is required'),
+    CHANNEL_WELCOME: z.string().min(1, 'CHANNEL_WELCOME is required'),
+    CHANNEL_VERIFIER_CATEGORY: z.string().min(1, 'CHANNEL_VERIFIER_CATEGORY is required'),
+    CHANNEL_TICKET_CATEGORY: z.string().min(1, 'CHANNEL_TICKET_CATEGORY is required'),
+    CHANNEL_STARBOARD: z.string().min(1, 'CHANNEL_STARBOARD is required'),
+    CHANNEL_AI: z.string().min(1, 'CHANNEL_AI is required'),
+    CHANNEL_WORD_OF_THE_DAY: z.string().min(1, 'CHANNEL_WORD_OF_THE_DAY is required'),
+    ROLE_DAILY_PING: z.string().min(1, 'ROLE_DAILY_PING is required'),
+    ROLE_SUSPECT: z.string().min(1, 'ROLE_SUSPECT is required'),
+    ROLE_MOD: z.string().min(1, 'ROLE_MOD is required'),
+    ROLE_SUPPORT: z.string().min(1, 'ROLE_SUPPORT is required'),
+    ROLE_RPLACE: z.string().min(1, 'ROLE_RPLACE is required'),
+    ROLE_LINK_WHITELIST_IDS: z.string().min(1, 'ROLE_LINK_WHITELIST_IDS is required'),
+});
+
+const env = envSchema.parse(process.env);
 
 export const config = {
-    clientId: "1118642654322884658",
-    guildId: "1118642257365585940",
+    clientId: env.DISCORD_CLIENT_ID,
+    guildId: env.DISCORD_GUILD_ID,
     channels: {
-        main: "1118642257814360107",
-        alerts: "1444501792497991781",
-        streaks: "1118642257814360107",
-        bot: "1444501792497991781",
-        logs: "1444501792497991781",
-        welcome: "1118642257365585942",
-        verifierCategory: "1444496878925381758",
-        ticketCategory: "1118644187181633707",
-        starboard: "1454616842101461206",
-        ai: "1454645774657781872",
-        wordOfTheDay: "1118642257814360107"
+        main: env.CHANNEL_MAIN,
+        alerts: env.CHANNEL_ALERTS,
+        streaks: env.CHANNEL_STREAKS,
+        bot: env.CHANNEL_BOT,
+        logs: env.CHANNEL_LOGS,
+        welcome: env.CHANNEL_WELCOME,
+        verifierCategory: env.CHANNEL_VERIFIER_CATEGORY,
+        ticketCategory: env.CHANNEL_TICKET_CATEGORY,
+        starboard: env.CHANNEL_STARBOARD,
+        ai: env.CHANNEL_AI,
+        wordOfTheDay: env.CHANNEL_WORD_OF_THE_DAY
     },
     roles: {
-        dailyPing: "1118644939899817994",
-        suspect: "1444496997921853631",
-        mod: "1118642400357777579",
-        support: "1118642400357777579",
-        rPlace: "1118642400357777579",
-        linkWhitelist: ["1118642400357777579", "1152330003460145174"]
+        dailyPing: env.ROLE_DAILY_PING,
+        suspect: env.ROLE_SUSPECT,
+        mod: env.ROLE_MOD,
+        support: env.ROLE_SUPPORT,
+        rPlace: env.ROLE_RPLACE,
+        linkWhitelist: env.ROLE_LINK_WHITELIST_IDS.split(',').map(id => id.trim())
     },
     links: {
         whitelist: ["https://tenor.com/view/", "https://media.discordapp.net/", "https://cdn.discordapp.com/"]

@@ -54,7 +54,7 @@ export const shopItems = sqliteTable('shop_items', {
 export const userInventory = sqliteTable('user_inventory', {
     id: integer('id').primaryKey({ autoIncrement: true }),
     userId: text('user_id').notNull(),
-    itemId: integer('item_id').references(() => shopItems.id).notNull(),
+    itemId: integer('item_id').references(() => shopItems.id, { onDelete: 'cascade' }).notNull(),
     acquiredAt: integer('acquired_at', { mode: 'timestamp' }).default(sql`(CURRENT_TIMESTAMP)`).notNull(),
 }, (table) => ({
     // Optimizes checking if a user owns a specific item
