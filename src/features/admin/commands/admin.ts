@@ -26,7 +26,9 @@ export const execute = async (interaction: ChatInputCommandInteraction, client: 
     }
 
     // Check for admin roles (Mod or Support as defined in config)
-    const member = interaction.member as GuildMember;
+    const member: GuildMember = interaction.member instanceof GuildMember
+        ? interaction.member
+        : await interaction.guild!.members.fetch(interaction.user.id);
     const hasRole = member.roles.cache.has(config.roles.mod) || member.roles.cache.has(config.roles.support);
 
     if (!hasRole && !interaction.memberPermissions?.has(PermissionsBitField.Flags.Administrator)) {

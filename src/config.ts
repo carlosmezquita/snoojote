@@ -3,7 +3,7 @@ import { z } from 'zod';
 
 const envSchema = z.object({
     DISCORD_CLIENT_ID: z.string().min(1, 'DISCORD_CLIENT_ID is required'),
-    DISCORD_GUILD_ID: z.string().min(1, 'DISCORD_GUILD_ID is required'),
+    DISCORD_GUILD_ID: z.string().min(1, 'DISCORD_GUILD_ID is required').optional(),
     CHANNEL_MAIN: z.string().min(1, 'CHANNEL_MAIN is required'),
     CHANNEL_ALERTS: z.string().min(1, 'CHANNEL_ALERTS is required'),
     CHANNEL_STREAKS: z.string().min(1, 'CHANNEL_STREAKS is required'),
