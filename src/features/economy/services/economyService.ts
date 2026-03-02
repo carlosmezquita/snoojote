@@ -23,12 +23,47 @@ export class EconomyService {
     }
 
     async transfer(senderId: string, receiverId: string, amount: number): Promise<boolean> {
-        const senderBalance = await this.getBalance(senderId);
-        if (senderBalance < amount) return false;
+        if (amount <= 0 || senderId === receiverId) return false;
 
-        await this.addBalance(senderId, -amount);
-        await this.addBalance(receiverId, amount);
-        return true;
+        try {
+            return db.transaction((tx) => {
+                // Conditional update for the sender to ensure atomicity
+                const debitResult = tx.update(users)
+                    .set({ points: sql`${users.points} - ${amount}` })
+                    .where(and(
+                        eq(users.userId, senderId),
+                        sql`${users.points} >= ${amount}`
+                    ))
+                    .run();
+
+                // If no rows were updated, either the user doesn't exist or they have insufficient funds
+                if (debitResult.changes === 0) {
+                    tx.rollback();
+                    return false;
+                }
+
+                // If debit was successful, credit the receiver
+                tx.insert(users)
+                    .values({ userId: receiverId, points: amount })
+                    .onConflictDoUpdate({
+                        target: users.userId,
+                        set: { points: sql`${users.points} + ${amount}` }
+                    })
+                    .run();
+
+                return true;
+            });
+        } catch (e) {
+            // tx.rollback() throws a special rollback error in better-sqlite3 that Drizzle catches,
+            // but if it propagates or another error occurs, we catch it here.
+            // Actually, in Drizzle with better-sqlite3, tx.rollback() throws an error to abort the transaction.
+            // If the error message is about rollback, we can return false.
+            if (e instanceof Error && e.message.includes('Rollback')) {
+                return false;
+            }
+            console.error("Transfer transaction failed:", e);
+            return false;
+        }
     }
 
     async getLeaderboard(limit: number = 10): Promise<{ user_id: string, points: number }[]> {
@@ -43,22 +78,17 @@ export class EconomyService {
     async getDailyQuest(userId: string, client: DiscordBot): Promise<QuestData> {
         let user = await db.select().from(users).where(eq(users.userId, userId)).get();
 
-        // If user doesn't exist, create simple record first (or handled by upsert later)
         if (!user) {
-            // We can't easily return a quest if user db record doesn't exist, so let's generate one and return it
-            // The persistence will happen when we update progress or claim
             return questService.generateQuest(client);
         }
 
         const now = new Date();
         const lastActivity = user.lastActivityDate;
 
-        // Check if we need to reset/generate a new quest for a new day
         const isNewDay = !lastActivity || lastActivity.getDate() !== now.getDate() || lastActivity.getMonth() !== now.getMonth();
 
         if (isNewDay || !user.dailyQuest) {
             const newQuest = await questService.generateQuest(client);
-            // We should save this immediately so it persists
             await db.insert(users)
                 .values({
                     userId,
@@ -70,13 +100,11 @@ export class EconomyService {
                     set: {
                         dailyQuest: newQuest,
                         lastActivityDate: now,
-                        // Optional: Reset other daily counters if we had them
                     }
                 });
             return newQuest;
         }
 
-        // Return existing quest (parse checks if Drizzle handles JSON automatically, usually yes with mode: 'json')
         return user.dailyQuest as QuestData;
     }
 
@@ -84,21 +112,19 @@ export class EconomyService {
         const user = await db.select().from(users).where(eq(users.userId, userId)).get();
         if (!user || !user.dailyQuest) return null;
 
-        const quest = user.dailyQuest as QuestData;
+        // Clone/create a new object to ensure Drizzle sees it as a new value if that's the issue?
+        // Or simply spread it.
+        const quest: QuestData = { ...user.dailyQuest as QuestData };
 
-        // Check if quest matches type
         if (quest.type !== type) return null;
-        if (quest.isCompleted) return quest; // Already done
+        if (quest.isCompleted) return quest;
 
-        // Check target requirements
         if (quest.targetId && quest.targetId !== channelId) return null;
 
-        // Update progress
         quest.current += increment;
 
-        // Check completion
-        const originallyCompleted = quest.isCompleted;
-        const isNowCompleted = questService.checkCompletion(quest);
+        // Check completion - this function modifies 'quest' object in place (sets isCompleted = true)
+        questService.checkCompletion(quest);
 
         await db.update(users)
             .set({ dailyQuest: quest })
@@ -108,40 +134,62 @@ export class EconomyService {
     }
 
     async claimDaily(userId: string): Promise<{ success: boolean, message: string, reward?: number }> {
-        const user = await db.select().from(users).where(eq(users.userId, userId)).get();
-        if (!user) return { success: false, message: "User not found." };
+        try {
+            return db.transaction((tx) => {
+                const user = tx.select().from(users).where(eq(users.userId, userId)).get();
+                if (!user) return { success: false, message: "User not found." };
 
-        const now = new Date();
-        const lastDaily = user.lastDaily;
+                const now = new Date();
+                const lastDaily = user.lastDaily;
 
-        // Check if 24h passed
-        if (lastDaily) {
-            const diff = now.getTime() - lastDaily.getTime();
-            const hours = diff / (1000 * 60 * 60);
-            if (hours < 24) {
-                const remaining = 24 - hours;
-                const h = Math.floor(remaining);
-                const m = Math.floor((remaining - h) * 60);
-                return { success: false, message: `Already claimed. Try again in ${h}h ${m}m.` };
-            }
+                if (lastDaily) {
+                    const diff = now.getTime() - lastDaily.getTime();
+                    const hours = diff / (1000 * 60 * 60);
+                    if (hours < 24) {
+                        const remaining = 24 - hours;
+                        const h = Math.floor(remaining);
+                        const m = Math.floor((remaining - h) * 60);
+                        return { success: false, message: `Already claimed. Try again in ${h}h ${m}m.` };
+                    }
+                }
+
+                const quest = user.dailyQuest as QuestData;
+
+                if (!quest || !quest.isCompleted) {
+                    return { success: false, message: "Daily Quest not completed yet!" };
+                }
+
+                const reward = 250;
+
+                // Atomic condition check for claimDaily: ensure lastDaily hasn't changed since we read it
+                const updateResult = tx.update(users)
+                    .set({
+                        points: sql`${users.points} + ${reward}`,
+                        lastDaily: now
+                    })
+                    .where(and(
+                        eq(users.userId, userId),
+                        // Depending on lastDaily being null or having a specific timestamp
+                        lastDaily === null
+                            ? sql`last_daily IS NULL`
+                            : eq(users.lastDaily, lastDaily)
+                    ))
+                    .run();
+
+                if (updateResult.changes === 0) {
+                    tx.rollback();
+                    return { success: false, message: "Failed to claim, possible concurrent request." };
+                }
+
+                return { success: true, message: "Daily reward claimed!", reward };
+            });
+        } catch (e) {
+             if (e instanceof Error && e.message.includes('Rollback')) {
+                 return { success: false, message: "Failed to claim, possible concurrent request." };
+             }
+             console.error("Claim Daily transaction failed:", e);
+             return { success: false, message: "An error occurred." };
         }
-
-        // Check quest completion
-        const quest = user.dailyQuest as QuestData;
-        if (!quest || !quest.isCompleted) {
-            return { success: false, message: "Daily Quest not completed yet!" };
-        }
-
-        // Award
-        const reward = 250; // Fixed reward
-        await this.addBalance(userId, reward);
-
-        // Update lastDaily
-        await db.update(users)
-            .set({ lastDaily: now })
-            .where(eq(users.userId, userId));
-
-        return { success: true, message: "Daily reward claimed!", reward };
     }
 }
 
