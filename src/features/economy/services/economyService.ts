@@ -27,18 +27,22 @@ export class EconomyService {
 
         try {
             return db.transaction((tx) => {
-                const currentSender = tx.select({ points: users.points })
-                    .from(users)
-                    .where(eq(users.userId, senderId))
-                    .get();
-
-                if (!currentSender || currentSender.points < amount) return false;
-
-                tx.update(users)
+                // Conditional update for the sender to ensure atomicity
+                const debitResult = tx.update(users)
                     .set({ points: sql`${users.points} - ${amount}` })
-                    .where(eq(users.userId, senderId))
+                    .where(and(
+                        eq(users.userId, senderId),
+                        sql`${users.points} >= ${amount}`
+                    ))
                     .run();
 
+                // If no rows were updated, either the user doesn't exist or they have insufficient funds
+                if (debitResult.changes === 0) {
+                    tx.rollback();
+                    return false;
+                }
+
+                // If debit was successful, credit the receiver
                 tx.insert(users)
                     .values({ userId: receiverId, points: amount })
                     .onConflictDoUpdate({
@@ -50,6 +54,13 @@ export class EconomyService {
                 return true;
             });
         } catch (e) {
+            // tx.rollback() throws a special rollback error in better-sqlite3 that Drizzle catches,
+            // but if it propagates or another error occurs, we catch it here.
+            // Actually, in Drizzle with better-sqlite3, tx.rollback() throws an error to abort the transaction.
+            // If the error message is about rollback, we can return false.
+            if (e instanceof Error && e.message.includes('Rollback')) {
+                return false;
+            }
             console.error("Transfer transaction failed:", e);
             return false;
         }
@@ -150,17 +161,32 @@ export class EconomyService {
 
                 const reward = 250;
 
-                tx.update(users)
+                // Atomic condition check for claimDaily: ensure lastDaily hasn't changed since we read it
+                const updateResult = tx.update(users)
                     .set({
                         points: sql`${users.points} + ${reward}`,
                         lastDaily: now
                     })
-                    .where(eq(users.userId, userId))
+                    .where(and(
+                        eq(users.userId, userId),
+                        // Depending on lastDaily being null or having a specific timestamp
+                        lastDaily === null
+                            ? sql`last_daily IS NULL`
+                            : eq(users.lastDaily, lastDaily)
+                    ))
                     .run();
+
+                if (updateResult.changes === 0) {
+                    tx.rollback();
+                    return { success: false, message: "Failed to claim, possible concurrent request." };
+                }
 
                 return { success: true, message: "Daily reward claimed!", reward };
             });
         } catch (e) {
+             if (e instanceof Error && e.message.includes('Rollback')) {
+                 return { success: false, message: "Failed to claim, possible concurrent request." };
+             }
              console.error("Claim Daily transaction failed:", e);
              return { success: false, message: "An error occurred." };
         }
