@@ -18,6 +18,7 @@ export class DiscordBot extends Client {
                 GatewayIntentBits.GuildMessages,
                 GatewayIntentBits.MessageContent,
                 GatewayIntentBits.GuildMembers,
+                GatewayIntentBits.GuildPresences,
                 GatewayIntentBits.DirectMessages,
                 GatewayIntentBits.GuildMessageReactions
             ],

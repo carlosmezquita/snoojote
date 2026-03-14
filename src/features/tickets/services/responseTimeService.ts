@@ -39,8 +39,8 @@ export class ResponseTimeService {
 
     /**
      * Fetches and counts active staff members (online, dnd, or idle)
-     * using guild.members.fetch() with a 5-minute in-memory cache to
-     * avoid Discord API rate-limits.
+     * using guild.members.fetch({ withPresences: true }) with a 5-minute
+     * in-memory cache to avoid Discord API rate-limits.
      */
     async getActiveStaffCount(guild: Guild): Promise<number> {
         const cacheKey = guild.id;
@@ -53,13 +53,16 @@ export class ResponseTimeService {
         const supportRoleId = config.roles.support;
         if (!supportRoleId) return 0;
 
+        let fetchSucceeded = false;
         try {
-            // Fetch all members to ensure presence data is available.
-            // This is necessary because Discord.js v14 purges offline/inactive
-            // members from the cache.
-            await guild.members.fetch();
+            // Fetch all members and presences so presence-based status counting
+            // is accurate even when member cache is sparse.
+            await guild.members.fetch({ withPresences: true });
+            fetchSucceeded = true;
         } catch {
-            // If fetch fails (rate-limit, permissions), fall back to cache
+            // If fetch fails (rate-limit, permissions), return stale cache
+            // when available instead of caching an incomplete fallback result.
+            if (cached) return cached.activeCount;
         }
 
         const supportRole = guild.roles.cache.get(supportRoleId);
@@ -70,7 +73,9 @@ export class ResponseTimeService {
             return status === 'online' || status === 'dnd' || status === 'idle';
         }).size;
 
-        staffCache.set(cacheKey, { activeCount, fetchedAt: Date.now() });
+        if (fetchSucceeded || !cached) {
+            staffCache.set(cacheKey, { activeCount, fetchedAt: Date.now() });
+        }
         return activeCount;
     }
 
@@ -146,7 +151,7 @@ export class ResponseTimeService {
             .from(tickets)
             .where(and(
                 isNotNull(tickets.firstResponseAt),
-                gte(tickets.createdAt, sixtyDaysAgo),
+                gte(tickets.firstResponseAt, sixtyDaysAgo),
             ))
             .all();
 
