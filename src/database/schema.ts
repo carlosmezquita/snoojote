@@ -27,6 +27,8 @@ export const streaks = sqliteTable('streaks', {
     streak: integer('streak').default(0).notNull(),
     highestStreak: integer('highest_streak').default(0).notNull(),
     lastStreakDate: text('last_streak_date'),
+    lastStreakAt: integer('last_streak_at', { mode: 'timestamp' }),
+    claimedMilestones: text('claimed_milestones', { mode: 'json' }).default(sql`'[]'`),
 });
 
 export const users = sqliteTable('users', {

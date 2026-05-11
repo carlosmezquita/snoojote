@@ -2,6 +2,7 @@ import { SlashCommandBuilder, ChatInputCommandInteraction } from 'discord.js';
 import { DiscordBot } from '../../../core/client.js';
 import streakService from '../services/StreakService.js';
 import { createEmbed, Colors } from '../../../shared/utils/embeds.js';
+import { getDailyReward, MILESTONE_BONUSES } from '../services/streakRules.js';
 
 export const data = new SlashCommandBuilder()
     .setName('streak')
@@ -23,9 +24,19 @@ export const execute = async (interaction: ChatInputCommandInteraction, client: 
         return;
     }
 
+    const freezeCount = await streakService.getStreakFreezeCount(target.id);
+    const currentStreak = userStreak.streak;
+    const nextMilestone = Object.keys(MILESTONE_BONUSES)
+        .map(Number)
+        .sort((a, b) => a - b)
+        .find(milestone => milestone > currentStreak);
+    const milestoneLine = nextMilestone
+        ? `Next Milestone: **${currentStreak}/${nextMilestone}** days`
+        : 'Next Milestone: **All milestones reached**';
+
     const embed = createEmbed(
         `🔥 ${target.username}'s Streak`,
-        `Current Streak: **${userStreak.streak}** days\nHighest Streak: **${userStreak.highestStreak || userStreak.streak}** days`,
+        `Current Streak: **${currentStreak}** days\nHighest Streak: **${userStreak.highestStreak || currentStreak}** days\nDaily Reward: **${getDailyReward(currentStreak)} ₧**\nStreak Freezes: **${freezeCount}**\n${milestoneLine}`,
         Colors.Warning
     ).setTimestamp();
 

@@ -1,8 +1,9 @@
 import db from '../../../database/db.js';
-import { users } from '../../../database/schema.js';
+import { streaks, users } from '../../../database/schema.js';
 import { eq, sql, desc, and } from 'drizzle-orm';
 import questService, { QuestData } from './questService.js';
 import { DiscordBot } from '../../../core/client.js';
+import { getDailyReward } from '../../streaks/services/streakRules.js';
 
 export class EconomyService {
     async getBalance(userId: string): Promise<number> {
@@ -20,6 +21,36 @@ export class EconomyService {
                 target: users.userId,
                 set: { points: sql`${users.points} + ${amount}` }
             });
+    }
+
+    async spendBalance(userId: string, amount: number): Promise<boolean> {
+        if (amount <= 0) return false;
+
+        try {
+            return db.transaction((tx) => {
+                const spendResult = tx.update(users)
+                    .set({ points: sql`${users.points} - ${amount}` })
+                    .where(and(
+                        eq(users.userId, userId),
+                        sql`${users.points} >= ${amount}`
+                    ))
+                    .returning({ userId: users.userId })
+                    .get();
+
+                if (!spendResult) {
+                    tx.rollback();
+                    return false;
+                }
+
+                return true;
+            });
+        } catch (e) {
+            if (e instanceof Error && e.message.includes('Rollback')) {
+                return false;
+            }
+            console.error("Spend transaction failed:", e);
+            return false;
+        }
     }
 
     async transfer(senderId: string, receiverId: string, amount: number): Promise<boolean> {
@@ -74,6 +105,15 @@ export class EconomyService {
             .limit(limit);
 
         return leaderboard;
+    }
+
+    async getCurrentDailyReward(userId: string): Promise<number> {
+        const userStreak = await db.select({ streak: streaks.streak })
+            .from(streaks)
+            .where(eq(streaks.userId, userId))
+            .get();
+
+        return getDailyReward(userStreak?.streak ?? 0);
     }
 
     async getDailyQuest(userId: string, client: DiscordBot): Promise<QuestData> {
@@ -160,7 +200,12 @@ export class EconomyService {
                     return { success: false, message: "Daily Quest not completed yet!" };
                 }
 
-                const reward = 250;
+                const userStreak = tx.select({ streak: streaks.streak })
+                    .from(streaks)
+                    .where(eq(streaks.userId, userId))
+                    .get();
+
+                const reward = getDailyReward(userStreak?.streak ?? 0);
 
                 // Atomic condition check for claimDaily: ensure lastDaily hasn't changed since we read it
                 const updateResult = tx.update(users)

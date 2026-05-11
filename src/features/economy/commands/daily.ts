@@ -10,6 +10,7 @@ export const data = new SlashCommandBuilder()
 export const execute = async (interaction: ChatInputCommandInteraction, client: DiscordBot) => {
     // 1. Get current quest (this also ensures one exists for the day)
     const quest = await economyService.getDailyQuest(interaction.user.id, client);
+    const currentReward = await economyService.getCurrentDailyReward(interaction.user.id);
 
     // 2. Try to claim (checks 24h cooldown AND completion)
     // We do a check first to see if we SHOULD claim or just show status
@@ -55,7 +56,7 @@ export const execute = async (interaction: ChatInputCommandInteraction, client: 
 
     const embed = createEmbed(
         'Daily Quest',
-        `**Quest**: ${quest.description}\n\n**Progress**: ${quest.current}/${quest.goal}\n${progressBar} ${percentage}%\n\nComplete this quest to claim your **250 ₧** daily reward!`,
+        `**Quest**: ${quest.description}\n\n**Progress**: ${quest.current}/${quest.goal}\n${progressBar} ${percentage}%\n\nComplete this quest to claim your **${currentReward} ₧** daily reward!`,
         Colors.Info
     );
 

@@ -23,6 +23,7 @@ const envSchema = z.object({
     ROLE_RPLACE: z.string().min(1, 'ROLE_RPLACE is required'),
     ROLE_LINK_WHITELIST_IDS: z.string().min(1, 'ROLE_LINK_WHITELIST_IDS is required'),
     MAX_OPEN_TICKETS_PER_USER: z.coerce.number().int().positive().default(3),
+    STREAK_CHANNEL_IDS: z.string().min(1, 'STREAK_CHANNEL_IDS is required').optional(),
 });
 
 const env = envSchema.parse(process.env);
@@ -61,5 +62,11 @@ export const config = {
     },
     tickets: {
         maxOpenPerUser: env.MAX_OPEN_TICKETS_PER_USER
+    },
+    streaks: {
+        channelIds: (env.STREAK_CHANNEL_IDS || `${env.CHANNEL_STREAKS},${env.CHANNEL_MAIN}`)
+            .split(',')
+            .map(id => id.trim())
+            .filter(Boolean)
     }
 };

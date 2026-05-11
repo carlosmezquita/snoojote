@@ -1,30 +1,35 @@
 import { Message, TextChannel } from 'discord.js';
-import { DiscordBot } from '../../../core/client.js';
+import { asc, desc, eq } from 'drizzle-orm';
 import db from '../../../database/db.js';
-import { streaks } from '../../../database/schema.js';
-import { eq, desc } from 'drizzle-orm';
+import { shopItems, streaks, userInventory } from '../../../database/schema.js';
 import { config } from '../../../config.js';
+import { DiscordBot } from '../../../core/client.js';
+import economyService from '../../economy/services/economyService.js';
+import {
+    getNewMilestones,
+    getSpainDateKey,
+    isWithinGracePeriod,
+    MILESTONE_BONUSES,
+} from './streakRules.js';
 
 const BOT_CHANNEL_ID = config.channels.bot;
+const STREAK_FREEZE_VALUE = 'STREAK_FREEZE';
+
+type StreakRecord = typeof streaks.$inferSelect;
 
 export class StreakService {
-    private readonly STREAK_SLACK_MS = 90000; // 1.5 minutes slack
-    private readonly RESET_HOUR = 14; // 2 PM
-
     async handleStreak(message: Message, client: DiscordBot) {
         const userId = message.author.id;
-        const todayUnix = this.getTodayUnix();
+        const now = new Date();
+        const todayKey = getSpainDateKey(now);
 
         try {
-            const userStreak = await db.select()
-                .from(streaks)
-                .where(eq(streaks.userId, userId))
-                .get();
+            const userStreak = await this.getUserStreak(userId);
 
             if (userStreak) {
-                await this.updateExistingStreak(message, userStreak, todayUnix, client);
+                await this.updateExistingStreak(message, userStreak, todayKey, now, client);
             } else {
-                await this.createNewStreak(message, todayUnix, client);
+                await this.createNewStreak(message, todayKey, now, client);
             }
 
         } catch (error) {
@@ -32,72 +37,103 @@ export class StreakService {
         }
     }
 
-    private getTodayUnix(): number {
-        const now = new Date();
-        const streakDate = new Date(now);
-
-        // If before reset hour, count as previous day
-        if (streakDate.getHours() < this.RESET_HOUR) {
-            streakDate.setDate(streakDate.getDate() - 1);
+    private async updateExistingStreak(message: Message, userStreak: StreakRecord, todayKey: string, now: Date, client: DiscordBot) {
+        if (userStreak.lastStreakDate === todayKey) {
+            return;
         }
 
-        streakDate.setHours(0, 0, 0, 0);
-        return Math.floor(streakDate.getTime() / 1000);
-    }
-
-    private async updateExistingStreak(message: Message, userStreak: any, todayUnix: number, client: DiscordBot) {
-        const lastDateUnix = userStreak.lastStreakDate ? parseInt(userStreak.lastStreakDate) : 0;
-
-        if (todayUnix === lastDateUnix) {
-            return; // Already claimed today
-        }
-
-        const diff = todayUnix - lastDateUnix;
+        const claimedMilestones = this.parseClaimedMilestones(userStreak.claimedMilestones);
+        const lastStreakAt = userStreak.lastStreakAt ?? this.dateFromLegacyValue(userStreak.lastStreakDate);
+        const maintainedByGrace = isWithinGracePeriod(lastStreakAt, now);
+        let usedFreeze = false;
         let newStreak = 1;
-        let messageContent = '';
 
-        // Check if streak is maintained (diff is 1 day in seconds, roughly 86400)
-        // But we compare unix timestamps of midnight. 
-        // 1 day difference = 86400 seconds.
-        // However, the original logic had `diff <= 90000` which implies checking if it's the *next* day.
-        // 86400 is exactly one day. 90000 gives a small buffer? 
-        // Actually, since we normalize to midnight, the diff should be exactly 86400 for consecutive days.
-        // If diff > 86400, they missed a day.
-
-        // Let's stick to the original logic's threshold but named constant
-        if (diff <= this.STREAK_SLACK_MS) {
+        if (maintainedByGrace) {
             newStreak = userStreak.streak + 1;
-            messageContent = `La racha actual de ${message.author.toString()} es de ${newStreak} días.`;
-            await message.react('🔥');
-        } else {
-            newStreak = 1;
-            messageContent = `${message.author.toString()} ha empezado una nueva racha.`;
+        } else if (await this.consumeStreakFreeze(message.author.id)) {
+            usedFreeze = true;
+            newStreak = userStreak.streak + 1;
         }
 
         const currentHighest = userStreak.highestStreak || 0;
-        const highestStreak = newStreak > currentHighest ? newStreak : currentHighest;
+        const highestStreak = Math.max(newStreak, currentHighest);
+        const newMilestones = getNewMilestones(newStreak, claimedMilestones);
+        const updatedClaimedMilestones = [...claimedMilestones, ...newMilestones];
 
         await db.update(streaks)
             .set({
                 streak: newStreak,
-                highestStreak: highestStreak,
-                lastStreakDate: todayUnix.toString()
+                highestStreak,
+                lastStreakDate: todayKey,
+                lastStreakAt: now,
+                claimedMilestones: updatedClaimedMilestones
             })
             .where(eq(streaks.userId, message.author.id));
 
-        await this.sendBotMessage(client, messageContent);
+        for (const milestone of newMilestones) {
+            await economyService.addBalance(message.author.id, MILESTONE_BONUSES[milestone]);
+        }
+
+        await message.react(newStreak > 1 ? '🔥' : '✅');
+        await this.sendBotMessage(client, this.buildStreakMessage(message, newStreak, usedFreeze, newMilestones));
     }
 
-    private async createNewStreak(message: Message, todayUnix: number, client: DiscordBot) {
+    private async createNewStreak(message: Message, todayKey: string, now: Date, client: DiscordBot) {
+        const newMilestones = getNewMilestones(1, []);
+
         await db.insert(streaks).values({
             userId: message.author.id,
             streak: 1,
             highestStreak: 1,
-            lastStreakDate: todayUnix.toString()
+            lastStreakDate: todayKey,
+            lastStreakAt: now,
+            claimedMilestones: newMilestones
         });
 
-        const welcomeMessage = `¡Hola ${message.author.toString()}!\n\nHas empezado tu primera racha.\nPara mantenerla debes enviar un 'spaincraft' diario.\n\n¡Sigue así!`;
-        await this.sendBotMessage(client, welcomeMessage);
+        await message.react('✅');
+        await this.sendBotMessage(
+            client,
+            `¡Hola ${message.author.toString()}!\n\nHas empezado tu primera racha. Ahora cualquier mensaje significativo en canales generales cuenta como check-in diario.`
+        );
+    }
+
+    private buildStreakMessage(message: Message, streak: number, usedFreeze: boolean, newMilestones: number[]) {
+        const lines = [
+            `La racha actual de ${message.author.toString()} es de ${streak} días.`
+        ];
+
+        if (usedFreeze) {
+            lines.push('🧊 Se consumió un Seguro de Racha para protegerla.');
+        }
+
+        for (const milestone of newMilestones) {
+            lines.push(`🎁 Hito de ${milestone} días: +${MILESTONE_BONUSES[milestone]} ₧.`);
+        }
+
+        return lines.join('\n');
+    }
+
+    private async consumeStreakFreeze(userId: string): Promise<boolean> {
+        const freezeItem = await db.select()
+            .from(shopItems)
+            .where(eq(shopItems.value, STREAK_FREEZE_VALUE))
+            .get();
+
+        if (!freezeItem) return false;
+
+        const inventorySlots = await db.select()
+            .from(userInventory)
+            .where(eq(userInventory.userId, userId))
+            .orderBy(asc(userInventory.acquiredAt))
+            .all();
+        const inventorySlot = inventorySlots.find(slot => slot.itemId === freezeItem.id);
+
+        if (!inventorySlot) return false;
+
+        await db.delete(userInventory)
+            .where(eq(userInventory.id, inventorySlot.id));
+
+        return true;
     }
 
     private async sendBotMessage(client: DiscordBot, content: string) {
@@ -120,6 +156,41 @@ export class StreakService {
             .orderBy(desc(streaks.highestStreak))
             .limit(limit)
             .all();
+    }
+
+    async getStreakFreezeCount(userId: string): Promise<number> {
+        const freezeItem = await db.select()
+            .from(shopItems)
+            .where(eq(shopItems.value, STREAK_FREEZE_VALUE))
+            .get();
+
+        if (!freezeItem) return 0;
+
+        const inventorySlots = await db.select()
+            .from(userInventory)
+            .where(eq(userInventory.userId, userId))
+            .all();
+
+        return inventorySlots.filter(slot => slot.itemId === freezeItem.id).length;
+    }
+
+    private parseClaimedMilestones(value: unknown): number[] {
+        if (Array.isArray(value)) {
+            return value.filter((item): item is number => typeof item === 'number');
+        }
+        return [];
+    }
+
+    private dateFromLegacyValue(value: string | null): Date | null {
+        if (!value) return null;
+
+        const unixSeconds = Number(value);
+        if (!Number.isNaN(unixSeconds)) {
+            return new Date(unixSeconds * 1000);
+        }
+
+        const parsed = new Date(`${value}T00:00:00+01:00`);
+        return Number.isNaN(parsed.getTime()) ? null : parsed;
     }
 }
 

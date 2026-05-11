@@ -2,12 +2,20 @@ export interface ShopItemConfig {
     name: string;
     description: string;
     price: number;
-    type: 'ROLE' | 'COLLECTIBLE';
+    type: 'ROLE' | 'COLLECTIBLE' | 'CONSUMABLE';
     value: string; // Role ID or Image URL
     emoji: string;
 }
 
 export const shopCatalog: ShopItemConfig[] = [
+    {
+        name: 'Seguro de Racha',
+        description: 'Protege automáticamente tu racha la próxima vez que olvides fichar.',
+        price: 10000,
+        type: 'CONSUMABLE',
+        value: 'STREAK_FREEZE',
+        emoji: '🧊'
+    },
     {
         name: 'Hidalgo',
         description: 'Un título noble de baja alcurnia.',

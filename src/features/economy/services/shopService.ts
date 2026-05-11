@@ -42,6 +42,7 @@ export class ShopService {
         }
 
         const userId = interaction.user.id;
+        const isConsumable = item.type === 'CONSUMABLE';
 
         // Check Balance
         const balance = await economyService.getBalance(userId);
@@ -54,7 +55,7 @@ export class ShopService {
             .where(and(eq(userInventory.userId, userId), eq(userInventory.itemId, item.id)))
             .get();
 
-        if (existing) {
+        if (existing && !isConsumable) {
             return { success: false, message: "Ya tienes este artículo." };
         }
 
@@ -85,8 +86,10 @@ export class ShopService {
             }
         }
 
-        // Transaction
-        await economyService.addBalance(userId, -item.price);
+        const paid = await economyService.spendBalance(userId, item.price);
+        if (!paid) {
+            return { success: false, message: `No tienes suficientes Pesetas. Necesitas **${item.price} ₧**.` };
+        }
 
         await db.insert(userInventory).values({
             userId,
