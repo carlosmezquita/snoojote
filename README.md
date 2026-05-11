@@ -23,8 +23,8 @@ A robust Discord bot built with TypeScript, Node.js, and Discord.js, featuring e
 
 ## Prerequisites
 
-- [Node.js](https://nodejs.org/) 20 or newer
-- npm
+- [Bun](https://bun.sh/) 1.3.13 or newer
+- [Node.js](https://nodejs.org/) 20 or newer for TypeScript tooling compatibility
 - A Discord bot with the Server Members, Message Content, and Presence privileged intents enabled
 
 ## Installation
@@ -37,7 +37,7 @@ A robust Discord bot built with TypeScript, Node.js, and Discord.js, featuring e
 
 2.  **Install dependencies:**
     ```bash
-    npm install
+    bun install
     ```
 
 3.  **Prepare the database directory:**
@@ -85,22 +85,22 @@ The bot validates these variables at startup and exits with a non-zero status if
 
 ### Development
 
-To run the bot in development mode (using `ts-node`):
+To run the bot in development mode:
 
 ```bash
-npm run dev
+bun run dev
 ```
 
 ### Production
 
 1.  **Build the project:**
     ```bash
-    npm run build
+    bun run build
     ```
 
 2.  **Start the bot:**
     ```bash
-    npm start
+    bun run start
     ```
 
 ### Deploying Commands
@@ -108,7 +108,7 @@ npm run dev
 To register slash commands with Discord:
 
 ```bash
-npm run deploy
+bun run deploy
 ```
 
 ## Project Structure

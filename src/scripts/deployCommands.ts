@@ -22,9 +22,8 @@ const commands = [];
 
 (async () => {
     try {
-        // Use relative path from current working directory, but normalize slashes
-        const distPath = path.join(process.cwd(), 'dist/features');
-        const pattern = `${distPath.replace(/\\/g, '/')}/**/commands/*.js`;
+        const sourcePath = path.join(process.cwd(), 'src/features');
+        const pattern = `${sourcePath.replace(/\\/g, '/')}/**/commands/*.{ts,js}`;
         const commandFiles = await glob(pattern);
 
         for (const file of commandFiles) {

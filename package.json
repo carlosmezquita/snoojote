@@ -2,13 +2,15 @@
   "name": "new_snoojote",
   "version": "1.0.0",
   "description": "",
-  "main": "dist/index.js",
+  "main": "src/index.ts",
+  "packageManager": "bun@1.3.13",
   "scripts": {
-    "start": "node dist/index.js",
-    "dev": "ts-node src/index.ts",
-    "build": "tsc",
-    "deploy": "npm run build && node dist/scripts/deployCommands.js",
-    "test": "echo \"Error: no test specified\""
+    "start": "bun src/index.ts",
+    "dev": "bun --watch src/index.ts",
+    "typecheck": "tsc --noEmit",
+    "build": "bun run typecheck",
+    "deploy": "bun src/scripts/deployCommands.ts",
+    "test": "bun test"
   },
   "keywords": [],
   "author": "",
@@ -34,7 +36,11 @@
     "@types/node-cron": "^3.0.11",
     "@types/ws": "^8.5.13",
     "drizzle-kit": "^0.31.7",
-    "ts-node": "^10.9.2",
     "typescript": "^5.7.2"
-  }
+  },
+  "trustedDependencies": [
+    "better-sqlite3",
+    "canvas",
+    "esbuild"
+  ]
 }

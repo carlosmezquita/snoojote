@@ -12,10 +12,10 @@ After pulling new changes (like added indexes or new tables), you need to update
 
 1. **Install dependencies** (if you haven't):
    ```bash
-   npm install
+   bun install
    ```
 2. **Push changes to the database**:
    ```bash
-   npx drizzle-kit push
+   bunx drizzle-kit push
    ```
    This command compares your local `schema.ts` with your `database.sqlite` and applies any missing changes.
