@@ -17,7 +17,7 @@ A robust Discord bot built with TypeScript, Node.js, and Discord.js, featuring e
 - **Language**: TypeScript
 - **Runtime**: Node.js
 - **Framework**: Discord.js (v14)
-- **Database**: SQLite (via `better-sqlite3` and `sqlite3`)
+- **Database**: SQLite (via Bun SQLite and Drizzle)
 - **ORM**: Drizzle ORM
 - **Other Tools**: `canvas` (for image generation), `node-cron` (for scheduled tasks), `winston` (logging).
 
@@ -125,7 +125,6 @@ new_snoojote/
 │   ├── config.ts       # Bot configuration
 │   └── index.ts        # Entry point
 ├── data/               # SQLite database storage (create if missing)
-├── dist/               # Compiled JavaScript
 ├── drizzle.config.ts   # Drizzle ORM configuration
 ├── package.json
 └── tsconfig.json

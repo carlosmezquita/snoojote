@@ -34,10 +34,11 @@ export class EconomyService {
                         eq(users.userId, senderId),
                         sql`${users.points} >= ${amount}`
                     ))
-                    .run();
+                    .returning({ userId: users.userId })
+                    .get();
 
                 // If no rows were updated, either the user doesn't exist or they have insufficient funds
-                if (debitResult.changes === 0) {
+                if (!debitResult) {
                     tx.rollback();
                     return false;
                 }
@@ -54,9 +55,9 @@ export class EconomyService {
                 return true;
             });
         } catch (e) {
-            // tx.rollback() throws a special rollback error in better-sqlite3 that Drizzle catches,
+            // tx.rollback() throws a special rollback error that Drizzle catches,
             // but if it propagates or another error occurs, we catch it here.
-            // Actually, in Drizzle with better-sqlite3, tx.rollback() throws an error to abort the transaction.
+            // Drizzle throws an error to abort the transaction.
             // If the error message is about rollback, we can return false.
             if (e instanceof Error && e.message.includes('Rollback')) {
                 return false;
@@ -174,9 +175,10 @@ export class EconomyService {
                             ? sql`last_daily IS NULL`
                             : eq(users.lastDaily, lastDaily)
                     ))
-                    .run();
+                    .returning({ userId: users.userId })
+                    .get();
 
-                if (updateResult.changes === 0) {
+                if (!updateResult) {
                     tx.rollback();
                     return { success: false, message: "Failed to claim, possible concurrent request." };
                 }

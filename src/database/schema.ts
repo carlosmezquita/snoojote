@@ -9,6 +9,10 @@ export const tickets = sqliteTable('tickets', {
     createdAt: integer('created_at', { mode: 'timestamp' }).default(sql`(CURRENT_TIMESTAMP)`).notNull(),
     firstResponseAt: integer('first_response_at', { mode: 'timestamp' }),
     closedAt: integer('closed_at', { mode: 'timestamp' }),
+    closedBy: text('closed_by'),
+    closeReason: text('close_reason'),
+    deletedAt: integer('deleted_at', { mode: 'timestamp' }),
+    claimedBy: text('claimed_by'),
     staffOnlineAtCreation: integer('staff_online_at_creation'),
     openTicketsAtCreation: integer('open_tickets_at_creation'),
 }, (table) => ({

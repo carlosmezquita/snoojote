@@ -15,12 +15,14 @@ const envSchema = z.object({
     CHANNEL_STARBOARD: z.string().min(1, 'CHANNEL_STARBOARD is required'),
     CHANNEL_AI: z.string().min(1, 'CHANNEL_AI is required'),
     CHANNEL_WORD_OF_THE_DAY: z.string().min(1, 'CHANNEL_WORD_OF_THE_DAY is required'),
+    CHANNEL_TRANSCRIPTS: z.string().min(1, 'CHANNEL_TRANSCRIPTS is required').optional(),
     ROLE_DAILY_PING: z.string().min(1, 'ROLE_DAILY_PING is required'),
     ROLE_SUSPECT: z.string().min(1, 'ROLE_SUSPECT is required'),
     ROLE_MOD: z.string().min(1, 'ROLE_MOD is required'),
     ROLE_SUPPORT: z.string().min(1, 'ROLE_SUPPORT is required'),
     ROLE_RPLACE: z.string().min(1, 'ROLE_RPLACE is required'),
     ROLE_LINK_WHITELIST_IDS: z.string().min(1, 'ROLE_LINK_WHITELIST_IDS is required'),
+    MAX_OPEN_TICKETS_PER_USER: z.coerce.number().int().positive().default(3),
 });
 
 const env = envSchema.parse(process.env);
@@ -39,7 +41,8 @@ export const config = {
         ticketCategory: env.CHANNEL_TICKET_CATEGORY,
         starboard: env.CHANNEL_STARBOARD,
         ai: env.CHANNEL_AI,
-        wordOfTheDay: env.CHANNEL_WORD_OF_THE_DAY
+        wordOfTheDay: env.CHANNEL_WORD_OF_THE_DAY,
+        transcripts: env.CHANNEL_TRANSCRIPTS || env.CHANNEL_LOGS
     },
     roles: {
         dailyPing: env.ROLE_DAILY_PING,
@@ -55,5 +58,8 @@ export const config = {
     starboard: {
         emojis: ["🤡", "⭐"],
         minReactions: 3
+    },
+    tickets: {
+        maxOpenPerUser: env.MAX_OPEN_TICKETS_PER_USER
     }
 };
