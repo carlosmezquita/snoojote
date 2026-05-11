@@ -9,34 +9,59 @@ const dailyPingID = config.roles.dailyPing;
 const alertsChannelID = config.channels.alerts;
 const MAX_RETRIES = 3;
 const RETRY_DELAY_MS = 5000;
+const DAILY_QUESTION_HOUR_MADRID = 14;
 
 const sleep = (ms: number) => new Promise(resolve => setTimeout(resolve, ms));
 
+interface QuestionsData {
+    current_id: number;
+    unread_questions?: string[];
+    read_questions?: Array<{ id: number; question: string }>;
+    last_sent_date?: string;
+}
+
 export class TriviaService {
-    async processDailyQuestion(channel: TextChannel, client: DiscordBot) {
+    async processDailyQuestionIfDue(channel: TextChannel, client: DiscordBot, now = new Date()) {
+        if (!this.isDailyQuestionTimeReached(now)) {
+            client.logger.info('Daily Question startup catch-up skipped: scheduled time has not been reached yet.');
+            return false;
+        }
+
+        return await this.processDailyQuestion(channel, client, { now });
+    }
+
+    async processDailyQuestion(channel: TextChannel, client: DiscordBot, options: { force?: boolean; now?: Date } = {}) {
         try {
             if (!fs.existsSync(fileName)) {
                 client.logger.error(`Daily Question Error: File not found at ${fileName}`);
-                return;
+                return false;
             }
 
             const fileContent = fs.readFileSync(fileName, "utf8");
-            const questions = JSON.parse(fileContent);
+            const questions = JSON.parse(fileContent) as QuestionsData;
+            const todayKey = this.getMadridDateKey(options.now ?? new Date());
+
+            if (!options.force && questions.last_sent_date === todayKey) {
+                client.logger.info(`Daily Question skipped: already sent for ${todayKey}.`);
+                return false;
+            }
 
             let questionText = "";
             let nextId = questions.current_id;
             let isOutOfStock = false;
             let randomIndex = -1;
+            const unreadQuestions = questions.unread_questions ?? [];
+            questions.unread_questions = unreadQuestions;
 
             // 1. Determine Content
-            if (!questions.unread_questions || questions.unread_questions.length === 0) {
+            if (unreadQuestions.length === 0) {
                 client.logger.warn("Daily Question: List is empty. Sending apology message.");
                 questionText = "*No quedan más preguntas, disculpe las molestias.*";
                 isOutOfStock = true;
             } else {
-                randomIndex = Math.floor(Math.random() * questions.unread_questions.length);
-                questionText = questions.unread_questions[randomIndex];
-                nextId = questions.current_id + 1;
+                randomIndex = Math.floor(Math.random() * unreadQuestions.length);
+                questionText = unreadQuestions[randomIndex];
+                nextId = (questions.current_id ?? 0) + 1;
             }
 
             // 2. Construct Payload
@@ -67,6 +92,8 @@ export class TriviaService {
 
             // 4. Post-Send Actions
             if (sentMessage) {
+                questions.last_sent_date = todayKey;
+
                 if (!isOutOfStock) {
                     // -- Create Thread --
                     try {
@@ -80,7 +107,7 @@ export class TriviaService {
 
                     // -- Update Database (File) --
                     questions.current_id = nextId;
-                    questions.unread_questions.splice(randomIndex, 1);
+                    unreadQuestions.splice(randomIndex, 1);
                     // Ensure read_questions exists
                     if (!questions.read_questions) questions.read_questions = [];
                     questions.read_questions.push({
@@ -92,7 +119,7 @@ export class TriviaService {
                 }
 
                 // 5. LOW QUESTIONS ALERT
-                const remainingCount = isOutOfStock ? 0 : questions.unread_questions.length;
+                const remainingCount = isOutOfStock ? 0 : unreadQuestions.length;
 
                 if (remainingCount < 50) {
                     try {
@@ -107,13 +134,52 @@ export class TriviaService {
                     }
                 }
 
+                if (isOutOfStock) {
+                    fs.writeFileSync(fileName, JSON.stringify(questions, null, 2), "utf8");
+                }
+
+                return true;
             } else {
                 client.logger.error("CRITICAL: Failed to send daily question after multiple attempts. Database not updated.");
+                return false;
             }
 
         } catch (error) {
             client.logger.error(`Daily Question System Error: ${error}`);
+            return false;
         }
+    }
+
+    private isDailyQuestionTimeReached(now: Date): boolean {
+        return this.getMadridHour(now) >= DAILY_QUESTION_HOUR_MADRID;
+    }
+
+    private getMadridDateKey(now: Date): string {
+        const parts = this.getMadridDateParts(now);
+        return `${parts.year}-${parts.month}-${parts.day}`;
+    }
+
+    private getMadridHour(now: Date): number {
+        return Number(this.getMadridDateParts(now).hour);
+    }
+
+    private getMadridDateParts(now: Date) {
+        const formatter = new Intl.DateTimeFormat('en-CA', {
+            timeZone: 'Europe/Madrid',
+            year: 'numeric',
+            month: '2-digit',
+            day: '2-digit',
+            hour: '2-digit',
+            hourCycle: 'h23'
+        });
+
+        const parts = Object.fromEntries(
+            formatter.formatToParts(now)
+                .filter(part => part.type !== 'literal')
+                .map(part => [part.type, part.value])
+        ) as { year: string; month: string; day: string; hour: string };
+
+        return parts;
     }
 }
 

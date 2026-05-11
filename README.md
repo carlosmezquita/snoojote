@@ -23,8 +23,9 @@ A robust Discord bot built with TypeScript, Node.js, and Discord.js, featuring e
 
 ## Prerequisites
 
-- [Node.js](https://nodejs.org/) (v16.9.0 or higher is recommended for Discord.js v14)
-- npm or yarn
+- [Node.js](https://nodejs.org/) 20 or newer
+- npm
+- A Discord bot with the Server Members, Message Content, and Presence privileged intents enabled
 
 ## Installation
 
@@ -49,33 +50,36 @@ A robust Discord bot built with TypeScript, Node.js, and Discord.js, featuring e
 
 ### Environment Variables
 
-Create a `.env` file in the root directory and add your Discord Bot Token:
+Copy `.env.example` to `.env` and fill in all required Discord IDs and secrets:
 
 ```env
 TOKEN=your_discord_bot_token_here
+GROQ_API_KEY=your_groq_api_key_here
+
+DISCORD_CLIENT_ID=your_discord_application_client_id
+DISCORD_GUILD_ID=optional_guild_id_for_fast_command_deploys
+
+CHANNEL_MAIN=channel_id
+CHANNEL_ALERTS=channel_id
+CHANNEL_STREAKS=channel_id
+CHANNEL_BOT=channel_id
+CHANNEL_LOGS=channel_id
+CHANNEL_WELCOME=channel_id
+CHANNEL_VERIFIER_CATEGORY=category_id
+CHANNEL_TICKET_CATEGORY=category_id
+CHANNEL_STARBOARD=channel_id
+CHANNEL_AI=channel_id
+CHANNEL_WORD_OF_THE_DAY=channel_id
+
+ROLE_DAILY_PING=role_id
+ROLE_SUSPECT=role_id
+ROLE_MOD=role_id
+ROLE_SUPPORT=role_id
+ROLE_RPLACE=role_id
+ROLE_LINK_WHITELIST_IDS=role_id,role_id
 ```
 
-### Bot Configuration
-
-The bot uses a configuration file located at `src/config.ts` for guild-specific settings such as Client ID, Guild ID, Channel IDs, and Role IDs.
-
-**Note:** You **must** update `src/config.ts` with your own server's IDs before running the bot, as the default values are hardcoded for a specific server.
-
-```typescript
-// src/config.ts
-export const config = {
-    clientId: "YOUR_CLIENT_ID",
-    guildId: "YOUR_GUILD_ID",
-    channels: {
-        main: "CHANNEL_ID",
-        // ... other channels
-    },
-    roles: {
-        // ... role IDs
-    },
-    // ...
-};
-```
+The bot validates these variables at startup and exits with a non-zero status if required values are missing.
 
 ## Running the Bot
 

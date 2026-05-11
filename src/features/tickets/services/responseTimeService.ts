@@ -21,6 +21,7 @@ interface StaffCacheEntry {
 
 const STAFF_CACHE_TTL_MS = 5 * 60 * 1000; // 5 minutes
 const staffCache = new Map<string, StaffCacheEntry>();
+const ESTIMATION_TIME_ZONE = 'Europe/Madrid';
 
 export class ResponseTimeService {
     /**
@@ -53,20 +54,26 @@ export class ResponseTimeService {
         const supportRoleId = config.roles.support;
         if (!supportRoleId) return 0;
 
+        let fetchedMembers = false;
         try {
-            // Fetch all members to ensure presence data is available.
-            // This is necessary because Discord.js v14 purges offline/inactive
-            // members from the cache.
-            await guild.members.fetch();
+            // Requires the GuildPresences intent to avoid undercounting active staff.
+            await guild.members.fetch({ withPresences: true });
+            fetchedMembers = true;
         } catch {
-            // If fetch fails (rate-limit, permissions), fall back to cache
+            if (cached) {
+                return cached.activeCount;
+            }
         }
 
         const supportRole = guild.roles.cache.get(supportRoleId);
         if (!supportRole) return 0;
 
+        if (!fetchedMembers) {
+            return 0;
+        }
+
         const activeCount = supportRole.members.filter(member => {
-            const status = member.presence?.status;
+            const status = member.presence?.status ?? guild.presences.cache.get(member.id)?.status;
             return status === 'online' || status === 'dnd' || status === 'idle';
         }).size;
 
@@ -135,8 +142,9 @@ export class ResponseTimeService {
 
         // Step 2.2: H_{d,h} — temporal baseline (same day-of-week + 4-hour block, last 60 days)
         const sixtyDaysAgo = new Date(now.getTime() - 60 * 24 * 60 * 60 * 1000);
-        const currentDay = now.getUTCDay();
-        const currentBlock = getTimeBlock(now.getUTCHours());
+        const currentParts = getTimeZoneParts(now);
+        const currentDay = currentParts.weekday;
+        const currentBlock = getTimeBlock(currentParts.hour);
 
         // Fetch all answered tickets from the last 60 days for temporal filtering
         const historicalRows = await db.select({
@@ -146,7 +154,7 @@ export class ResponseTimeService {
             .from(tickets)
             .where(and(
                 isNotNull(tickets.firstResponseAt),
-                gte(tickets.createdAt, sixtyDaysAgo),
+                gte(tickets.firstResponseAt, sixtyDaysAgo),
             ))
             .all();
 
@@ -155,9 +163,9 @@ export class ResponseTimeService {
         const temporalTickets: TicketResponseData[] = historicalRows
             .filter(r => {
                 if (!r.firstResponseAt) return false;
-                const d = r.createdAt;
-                return d.getUTCDay() === currentDay
-                    && getTimeBlock(d.getUTCHours()) === currentBlock;
+                const parts = getTimeZoneParts(r.createdAt);
+                return parts.weekday === currentDay
+                    && getTimeBlock(parts.hour) === currentBlock;
             })
             .map(r => ({
                 createdAt: r.createdAt,
@@ -193,3 +201,25 @@ export class ResponseTimeService {
 }
 
 export default new ResponseTimeService();
+
+function getTimeZoneParts(date: Date): { weekday: number; hour: number } {
+    const formatter = new Intl.DateTimeFormat('en-US', {
+        timeZone: ESTIMATION_TIME_ZONE,
+        weekday: 'short',
+        hour: '2-digit',
+        hourCycle: 'h23',
+    });
+
+    const parts = Object.fromEntries(
+        formatter.formatToParts(date)
+            .filter(part => part.type !== 'literal')
+            .map(part => [part.type, part.value])
+    ) as { weekday: string; hour: string };
+
+    const weekdays = ['Sun', 'Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat'];
+
+    return {
+        weekday: weekdays.indexOf(parts.weekday),
+        hour: Number(parts.hour),
+    };
+}

@@ -1,9 +1,13 @@
 import { drizzle } from 'drizzle-orm/better-sqlite3';
 import Database from 'better-sqlite3';
+import fs from 'fs';
 import path from 'path';
 import * as schema from './schema.js';
 
-const dbPath = path.join(process.cwd(), 'data', 'database.sqlite');
+const dataDir = path.join(process.cwd(), 'data');
+fs.mkdirSync(dataDir, { recursive: true });
+
+const dbPath = path.join(dataDir, 'database.sqlite');
 const sqlite = new Database(dbPath);
 
 // Enable Foreign Key support

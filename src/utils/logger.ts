@@ -1,5 +1,9 @@
 import winston from 'winston';
+import fs from 'fs';
 import path from 'path';
+
+const logsDir = path.join(process.cwd(), 'logs');
+fs.mkdirSync(logsDir, { recursive: true });
 
 const logFormat = winston.format.printf(({ level, message, timestamp }) => {
     return `[${timestamp}] ${level.toUpperCase()}: ${message}`;
@@ -19,11 +23,11 @@ const logger = winston.createLogger({
             )
         }),
         new winston.transports.File({
-            filename: path.join(process.cwd(), 'logs', 'error.log'),
+            filename: path.join(logsDir, 'error.log'),
             level: 'error'
         }),
         new winston.transports.File({
-            filename: path.join(process.cwd(), 'logs', 'combined.log')
+            filename: path.join(logsDir, 'combined.log')
         })
     ]
 });

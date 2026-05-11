@@ -27,5 +27,6 @@ process.on('uncaughtException', (error) => {
     } catch (error) {
         logger.error('Failed to start bot:');
         console.error(error);
+        process.exitCode = 1;
     }
 })();

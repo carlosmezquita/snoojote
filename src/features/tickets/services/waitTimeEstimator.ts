@@ -1,9 +1,9 @@
 /**
- * Wait Time Estimator — Hybrid Empirical-Load Algorithm.
+ * Wait Time Estimator — Hybrid Median-and-Load Algorithm.
  *
- * Combines an Exponential Moving Average for real-time system turbulence,
- * a Temporal Baseline for seasonality (day/time), and a Load Factor
- * derived from Little's Law to account for queue and staff availability.
+ * Combines a recency-weighted median of recent response times, a temporal
+ * median baseline for seasonality (day/time), and a load factor derived from
+ * Little's Law to account for queue and staff availability.
  *
  * Formula:
  *   W_est = (α · M_recent + (1 - α) · H_{d,h}) × L(Q, S)

@@ -17,7 +17,6 @@ import { DiscordBot } from '../../../core/client.js';
 import captchaService from './CaptchaService.js';
 import verificationState from './VerificationStateService.js';
 import { config } from '../../../config.js';
-import { DMService } from '../../../shared/services/DMService.js';
 
 class VerificationService {
     private readonly SUSPECT_ROLE_ID = config.roles.suspect;
@@ -26,6 +25,7 @@ class VerificationService {
     private readonly LOG_CHANNEL_ID = config.channels.logs;
 
     private readonly KICK_TIMEOUT_MS = 10 * 60 * 1000; // 10 minutes
+    private readonly STALE_CHANNEL_MS = 15 * 60 * 1000; // 15 minutes
     private readonly MAX_ATTEMPTS = 3;
 
     /**
@@ -73,6 +73,9 @@ class VerificationService {
             if (interaction.isRepliable()) {
                 await interaction.reply({ content: "⚠️ Error de sesión. Por favor reingresa.", ephemeral: true });
             }
+            if (interaction.channelId) {
+                this.scheduleVerificationChannelDelete(interaction.channelId, client, 'stale verification session', 10_000, interaction.channel);
+            }
             return;
         }
 
@@ -113,20 +116,21 @@ class VerificationService {
 
     private async handleSuccess(interaction: any, userState: any, userId: string, client: DiscordBot) {
         try {
-            userState.timeouts.forEach((t: NodeJS.Timeout) => clearTimeout(t));
             if (interaction.member && 'roles' in interaction.member) {
                 await interaction.member.roles.remove(this.SUSPECT_ROLE_ID);
             }
-            verificationState.delete(userId);
 
             await interaction.reply({ content: "✅ **Verificado / Verified.**", ephemeral: true });
             await this.sendLog(interaction.guild, `🟢 **Verificación Exitosa:** <@${userId}>`, client);
 
             client.emit('guildMemberVerified', interaction.member as GuildMember);
-
-            setTimeout(() => interaction.channel?.delete().catch(() => { }), 3000);
         } catch (err) {
-            await interaction.reply({ content: "Error de permisos.", ephemeral: true });
+            client.logger.error(`Verification Success Cleanup Error for ${userId}: ${err}`);
+            if (interaction.isRepliable() && !interaction.replied && !interaction.deferred) {
+                await interaction.reply({ content: "Error de permisos.", ephemeral: true }).catch(() => { });
+            }
+        } finally {
+            this.cleanupVerificationSession(userId, client, 'verification success', 3000, interaction.channel);
         }
     }
 
@@ -136,16 +140,20 @@ class VerificationService {
         await this.sendLog(interaction.guild, `⚠️ **Fallo:** <@${userId}>. Quedan ${attemptsLeft} intentos.`, client);
 
         if (userState.attempts >= this.MAX_ATTEMPTS) {
-            userState.timeouts.forEach((t: NodeJS.Timeout) => clearTimeout(t));
             try {
                 if (interaction.member && 'kick' in interaction.member) {
                     await interaction.member.kick("Falló 3 veces.");
                 }
                 await this.sendLog(interaction.guild, `🚫 **Expulsado (Intentos):** <@${userId}> falló 3 veces.`, client);
                 await interaction.reply({ content: "❌ **Expulsado / Kicked**", ephemeral: true });
-                setTimeout(() => interaction.channel?.delete().catch(() => { }), 3000);
-                verificationState.delete(userId);
-            } catch (e) { }
+            } catch (e) {
+                client.logger.error(`Verification Failure Cleanup Error for ${userId}: ${e}`);
+                if (interaction.isRepliable() && !interaction.replied && !interaction.deferred) {
+                    await interaction.reply({ content: "No pude expulsar al usuario. Revisa permisos.", ephemeral: true }).catch(() => { });
+                }
+            } finally {
+                this.cleanupVerificationSession(userId, client, 'verification failed max attempts', 3000, interaction.channel);
+            }
         } else {
             // Retry logic
             await interaction.deferUpdate();
@@ -223,15 +231,51 @@ class VerificationService {
 
         const kickTid = setTimeout(async () => {
             const currentMember = await member.guild.members.fetch(member.id).catch(() => null);
-            if (currentMember && currentMember.roles.cache.has(this.SUSPECT_ROLE_ID)) {
-                await currentMember.kick("Tiempo agotado.");
-                await this.sendLog(member.guild, `💀 **Expulsado (Timeout):** <@${member.id}>`, client);
-                if (channel) await channel.delete().catch(() => { });
-                verificationState.delete(member.id);
+            try {
+                if (currentMember && currentMember.roles.cache.has(this.SUSPECT_ROLE_ID)) {
+                    await currentMember.kick("Tiempo agotado.");
+                    await this.sendLog(member.guild, `💀 **Expulsado (Timeout):** <@${member.id}>`, client);
+                } else if (currentMember) {
+                    await this.sendLog(member.guild, `🧹 **Canal de verificación limpiado:** <@${member.id}> ya no tiene el rol sospechoso.`, client);
+                } else {
+                    await this.sendLog(member.guild, `🧹 **Canal de verificación limpiado:** <@${member.id}> ya no está en el servidor.`, client);
+                }
+            } catch (error) {
+                client.logger.error(`Verification Timeout Error for ${member.id}: ${error}`);
+            } finally {
+                this.cleanupVerificationSession(member.id, client, 'verification timeout', 0, channel);
             }
         }, this.KICK_TIMEOUT_MS);
 
         state.timeouts.push(kickTid);
+    }
+
+    public async cleanupStaleVerificationChannels(client: DiscordBot) {
+        const now = Date.now();
+
+        for (const guild of client.guilds.cache.values()) {
+            try {
+                const channels = await guild.channels.fetch();
+
+                for (const channel of channels.values()) {
+                    if (
+                        !channel ||
+                        channel.type !== ChannelType.GuildText ||
+                        !channel.name.startsWith('verify-') ||
+                        channel.parentId !== this.VERIFIER_CATEGORY_ID
+                    ) {
+                        continue;
+                    }
+
+                    const channelAge = now - channel.createdTimestamp;
+                    if (channelAge < this.STALE_CHANNEL_MS) continue;
+
+                    await this.deleteVerificationChannel(channel.id, client, 'stale verification channel after restart', channel);
+                }
+            } catch (error) {
+                client.logger.error(`Stale Verification Cleanup Error for ${guild.id}: ${error}`);
+            }
+        }
     }
 
     public async generateChallengePayload(memberId: string, attemptsLeft: number) {
@@ -268,6 +312,56 @@ class VerificationService {
             const channel = await guild.channels.fetch(this.LOG_CHANNEL_ID).catch(() => null) as TextChannel;
             if (channel) await channel.send(`🛡️ **Seguridad:** ${text}`);
         } catch (err) { client.logger.error(`Log Error: ${err}`); }
+    }
+
+    private cleanupVerificationSession(userId: string, client: DiscordBot, reason: string, delayMs: number, channel?: any) {
+        const state = verificationState.get(userId);
+        const channelId = state?.channelId ?? channel?.id;
+
+        if (state) {
+            state.timeouts.forEach((t: NodeJS.Timeout) => clearTimeout(t));
+        }
+        verificationState.delete(userId);
+
+        if (channelId) {
+            this.scheduleVerificationChannelDelete(channelId, client, reason, delayMs, channel);
+        }
+    }
+
+    private scheduleVerificationChannelDelete(channelId: string, client: DiscordBot, reason: string, delayMs: number, channel?: any) {
+        const deleteChannel = async () => {
+            await this.deleteVerificationChannel(channelId, client, reason, channel);
+        };
+
+        if (delayMs > 0) {
+            setTimeout(() => {
+                void deleteChannel();
+            }, delayMs);
+            return;
+        }
+
+        void deleteChannel();
+    }
+
+    private async deleteVerificationChannel(channelId: string, client: DiscordBot, reason: string, channel?: any) {
+        try {
+            const target = channel ?? await client.channels.fetch(channelId).catch(() => null);
+
+            if (!target) {
+                client.logger.warn(`Verification Cleanup: channel ${channelId} already missing (${reason}).`);
+                return;
+            }
+
+            if (typeof target.delete !== 'function') {
+                client.logger.warn(`Verification Cleanup: channel ${channelId} is not deletable (${reason}).`);
+                return;
+            }
+
+            await target.delete(`Verification cleanup: ${reason}`);
+            client.logger.info(`Verification Cleanup: deleted channel ${channelId} (${reason}).`);
+        } catch (error) {
+            client.logger.error(`Verification Cleanup: failed to delete channel ${channelId} (${reason}): ${error}`);
+        }
     }
 }
 
