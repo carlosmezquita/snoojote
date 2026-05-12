@@ -8,7 +8,7 @@ import economyService from '../../economy/services/economyService.js';
 import {
     getNewMilestones,
     getSpainDateKey,
-    isWithinGracePeriod,
+    isConsecutiveDay,
     MILESTONE_BONUSES,
 } from './streakRules.js';
 
@@ -48,13 +48,12 @@ export class StreakService {
         }
 
         const claimedMilestones = this.parseClaimedMilestones(userStreak.claimedMilestones);
-        const lastStreakAt =
-            userStreak.lastStreakAt ?? this.dateFromLegacyValue(userStreak.lastStreakDate);
-        const maintainedByGrace = isWithinGracePeriod(lastStreakAt, now);
+        const lastStreakDate = userStreak.lastStreakDate;
+        const isConsecutive = isConsecutiveDay(lastStreakDate, todayKey);
         let usedFreeze = false;
         let newStreak = 1;
 
-        if (maintainedByGrace) {
+        if (isConsecutive) {
             newStreak = userStreak.streak + 1;
         } else if (await this.consumeStreakFreeze(message.author.id)) {
             usedFreeze = true;

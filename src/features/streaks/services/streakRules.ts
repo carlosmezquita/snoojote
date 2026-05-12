@@ -1,5 +1,4 @@
 export const STREAK_TIME_ZONE = 'Europe/Madrid';
-export const STREAK_GRACE_PERIOD_MS = 36 * 60 * 60 * 1000;
 export const DAILY_REWARD_BASE = 250;
 export const DAILY_REWARD_PER_STREAK_DAY = 5;
 
@@ -28,13 +27,21 @@ export function getSpainDateKey(date: Date): string {
     return `${parts.year}-${parts.month}-${parts.day}`;
 }
 
-export function getDailyReward(streakDays: number): number {
-    return DAILY_REWARD_BASE + Math.max(0, streakDays) * DAILY_REWARD_PER_STREAK_DAY;
+export function isConsecutiveDay(lastDateKey: string | null | undefined, todayDateKey: string): boolean {
+    if (!lastDateKey) return false;
+
+    // Parse YYYY-MM-DD keys into Date objects at midnight UTC for consistent diffing
+    const last = new Date(`${lastDateKey}T00:00:00Z`);
+    const today = new Date(`${todayDateKey}T00:00:00Z`);
+
+    const diffMs = today.getTime() - last.getTime();
+    const oneDayMs = 24 * 60 * 60 * 1000;
+
+    return diffMs === oneDayMs;
 }
 
-export function isWithinGracePeriod(lastStreakAt: Date | null | undefined, now: Date): boolean {
-    if (!lastStreakAt) return false;
-    return now.getTime() - lastStreakAt.getTime() <= STREAK_GRACE_PERIOD_MS;
+export function getDailyReward(streakDays: number): number {
+    return DAILY_REWARD_BASE + Math.max(0, streakDays) * DAILY_REWARD_PER_STREAK_DAY;
 }
 
 export function getNewMilestones(streakDays: number, claimedMilestones: number[]): number[] {
