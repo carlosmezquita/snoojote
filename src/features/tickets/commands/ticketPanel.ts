@@ -11,12 +11,21 @@ import { type DiscordBot } from '../../../core/client.js';
 import { ticketOptionsList } from '../config/options/index.js';
 import { mainTicketPanel } from '../config/panel.js';
 
+import { GuildMember, PermissionFlagsBits } from 'discord.js';
+import { isStaff } from '../../../shared/utils/permissions.js';
+
 export const data = new SlashCommandBuilder()
     .setName('ticketpanel')
-    .setDescription('Send the ticket creation panel (Admin only).');
+    .setDescription('Send the ticket creation panel (Admin only).')
+    .setDefaultMemberPermissions(PermissionFlagsBits.Administrator);
 
 export const execute = async (interaction: ChatInputCommandInteraction, client: DiscordBot) => {
-    if (!interaction.memberPermissions?.has('Administrator')) {
+    if (!interaction.inGuild()) return;
+
+    const member = (interaction.member as GuildMember) || 
+        await interaction.guild!.members.fetch(interaction.user.id);
+
+    if (!isStaff(member)) {
         await interaction.reply({ content: 'No tienes permiso.', ephemeral: true });
         return;
     }

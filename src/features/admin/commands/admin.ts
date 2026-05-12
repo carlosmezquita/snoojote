@@ -8,6 +8,8 @@ import { type DiscordBot } from '../../../core/client.js';
 import { config } from '../../../config.js';
 import { postDailyWord } from '../../dailyWord/events/dailyWord.js';
 
+import { isStaff } from '../../../shared/utils/permissions.js';
+
 export const data = new SlashCommandBuilder()
     .setName('admin')
     .setDescription('Comandos administrativos')
@@ -29,15 +31,10 @@ export const execute = async (interaction: ChatInputCommandInteraction, client: 
         return;
     }
 
-    // Check for admin roles (Mod or Support as defined in config)
-    const member: GuildMember =
-        interaction.member instanceof GuildMember
-            ? interaction.member
-            : await interaction.guild!.members.fetch(interaction.user.id);
-    const hasRole =
-        member.roles.cache.has(config.roles.mod) || member.roles.cache.has(config.roles.support);
+    const member = (interaction.member as GuildMember) || 
+        await interaction.guild!.members.fetch(interaction.user.id);
 
-    if (!hasRole && !interaction.memberPermissions?.has(PermissionsBitField.Flags.Administrator)) {
+    if (!isStaff(member)) {
         await interaction.reply({
             content: 'No tienes permiso para usar este comando.',
             ephemeral: true,

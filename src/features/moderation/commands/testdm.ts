@@ -1,5 +1,6 @@
-import { SlashCommandBuilder, type ChatInputCommandInteraction } from 'discord.js';
+import { SlashCommandBuilder, type ChatInputCommandInteraction, GuildMember, PermissionFlagsBits } from 'discord.js';
 import { DMService, DMType } from '../../../shared/services/DMService.js';
+import { isStaff } from '../../../shared/utils/permissions.js';
 
 export const data = new SlashCommandBuilder()
     .setName('testdm')
@@ -17,9 +18,20 @@ export const data = new SlashCommandBuilder()
                 { name: 'Gift', value: DMType.Gift },
                 { name: 'Neutral', value: DMType.Neutral },
             ),
-    );
+    )
+    .setDefaultMemberPermissions(PermissionFlagsBits.Administrator);
 
 export async function execute(interaction: ChatInputCommandInteraction) {
+    if (interaction.guild) {
+        const member = (interaction.member as GuildMember) || 
+            await interaction.guild!.members.fetch(interaction.user.id);
+
+        if (!isStaff(member)) {
+            await interaction.reply({ content: 'No tienes permiso.', ephemeral: true });
+            return;
+        }
+    }
+
     const type = interaction.options.getString('type') as DMType;
 
     await interaction.deferReply({ ephemeral: true });

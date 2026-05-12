@@ -8,6 +8,8 @@ import { type DiscordBot } from '../../../core/client.js';
 import verificationService from '../services/VerificationService.js';
 import { createEmbed, Colors } from '../../../shared/utils/embeds.js';
 
+import { isStaff } from '../../../shared/utils/permissions.js';
+
 export const data = new SlashCommandBuilder()
     .setName('challenge')
     .setDescription('Manually trigger verification for a user.')
@@ -25,35 +27,46 @@ export const execute = async (interaction: ChatInputCommandInteraction, client: 
         return;
     }
 
+    const member = (interaction.member as GuildMember) || 
+        await interaction.guild!.members.fetch(interaction.user.id);
+
+    if (!isStaff(member)) {
+        await interaction.reply({
+            content: 'No tienes permiso para usar este comando.',
+            ephemeral: true,
+        });
+        return;
+    }
+
     const targetUser = interaction.options.getUser('user', true);
 
-    let member: GuildMember | undefined;
+    let targetMember: GuildMember | undefined;
     try {
-        member = await interaction.guild?.members.fetch(targetUser.id);
+        targetMember = await interaction.guild?.members.fetch(targetUser.id);
     } catch (error) {
         // Handle fetch error (e.g., user not found)
     }
 
-    if (!member) {
+    if (!targetMember) {
         await interaction.reply({ content: 'User not found in this guild.', ephemeral: true });
         return;
     }
 
-    if (member.user.bot) {
+    if (targetMember.user.bot) {
         await interaction.reply({ content: 'Cannot challenge a bot.', ephemeral: true });
         return;
     }
 
     await interaction.deferReply({ ephemeral: true });
 
-    const accountAgeMs = Date.now() - member.user.createdTimestamp;
+    const accountAgeMs = Date.now() - targetMember.user.createdTimestamp;
 
     try {
-        await verificationService.handleMemberJoin(member, client, accountAgeMs);
+        await verificationService.handleMemberJoin(targetMember, client, accountAgeMs);
 
         const embed = createEmbed(
             'Challenge Initiated',
-            `Verification process started for ${member.toString()}.`,
+            `Verification process started for ${targetMember.toString()}.`,
             Colors.Success,
         );
         await interaction.editReply({ embeds: [embed] });

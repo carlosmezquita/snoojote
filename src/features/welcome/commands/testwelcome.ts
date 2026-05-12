@@ -1,11 +1,23 @@
-import { SlashCommandBuilder, type ChatInputCommandInteraction } from 'discord.js';
+import { SlashCommandBuilder, type ChatInputCommandInteraction, GuildMember, PermissionFlagsBits } from 'discord.js';
 import { DMService } from '../../../shared/services/DMService.js';
+import { isStaff } from '../../../shared/utils/permissions.js';
 
 export const data = new SlashCommandBuilder()
     .setName('testwelcome')
-    .setDescription('Test the Welcome DM');
+    .setDescription('Test the Welcome DM')
+    .setDefaultMemberPermissions(PermissionFlagsBits.Administrator);
 
 export async function execute(interaction: ChatInputCommandInteraction) {
+    if (!interaction.inGuild()) return;
+
+    const member = (interaction.member as GuildMember) || 
+        await interaction.guild!.members.fetch(interaction.user.id);
+
+    if (!isStaff(member)) {
+        await interaction.reply({ content: 'No tienes permiso.', ephemeral: true });
+        return;
+    }
+
     await interaction.deferReply({ ephemeral: true });
 
     const username = interaction.user.username.replace(/_/g, '\\_');
