@@ -1,14 +1,19 @@
-import { SlashCommandBuilder, type ChatInputCommandInteraction, GuildMember, PermissionFlagsBits } from 'discord.js';
+import {
+    SlashCommandBuilder,
+    type ChatInputCommandInteraction,
+    type GuildMember,
+    PermissionFlagsBits,
+} from 'discord.js';
 import { DMService, DMType } from '../../../shared/services/DMService.js';
 import { isStaff } from '../../../shared/utils/permissions.js';
 
 export const data = new SlashCommandBuilder()
     .setName('testdm')
-    .setDescription('Test the DM Service')
+    .setDescription('Prueba el servicio de mensajes directos')
     .addStringOption((option) =>
         option
             .setName('type')
-            .setDescription('The type of DM to send')
+            .setDescription('El tipo de mensaje directo que se enviará')
             .setRequired(true)
             .addChoices(
                 { name: 'Info', value: DMType.Info },
@@ -23,8 +28,9 @@ export const data = new SlashCommandBuilder()
 
 export async function execute(interaction: ChatInputCommandInteraction) {
     if (interaction.guild) {
-        const member = (interaction.member as GuildMember) || 
-            await interaction.guild!.members.fetch(interaction.user.id);
+        const member =
+            (interaction.member as GuildMember) ||
+            (await interaction.guild.members.fetch(interaction.user.id));
 
         if (!isStaff(member)) {
             await interaction.reply({ content: 'No tienes permiso.', ephemeral: true });
@@ -36,17 +42,21 @@ export async function execute(interaction: ChatInputCommandInteraction) {
 
     await interaction.deferReply({ ephemeral: true });
 
-    const sent = await DMService.send({
+    const result = await DMService.sendWithFallback({
         user: interaction.user,
         type: type,
-        title: `Test DM: ${type}`,
-        description: `This is a test message for the **${type}** notification type.`,
-        footer: 'Snoojote Test System',
+        title: `Prueba de MD: ${type}`,
+        description: `Este es un mensaje de prueba para el tipo de notificación **${type}**.`,
+        footer: 'Sistema de pruebas de Snoojote',
     });
 
-    if (sent) {
-        await interaction.editReply(`✅ Sent a **${type}** DM to you! Check your direct messages.`);
+    if (result.dmSent) {
+        await interaction.editReply(`✅ Te he enviado un MD de tipo **${type}**.`);
+    } else if (result.fallbackSent) {
+        await interaction.editReply(
+            `✅ Tenías los MD cerrados, así que he publicado la prueba **${type}** en el canal del bot.`,
+        );
     } else {
-        await interaction.editReply(`❌ Failed to send DM. Your DMs might be closed.`);
+        await interaction.editReply(`❌ No se pudo enviar el MD ni el mensaje alternativo.`);
     }
 }

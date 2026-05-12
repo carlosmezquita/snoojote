@@ -1,14 +1,13 @@
-export const STREAK_TIME_ZONE = 'Europe/Madrid';
-export const STREAK_GRACE_PERIOD_MS = 36 * 60 * 60 * 1000;
-export const DAILY_REWARD_BASE = 250;
-export const DAILY_REWARD_PER_STREAK_DAY = 5;
+import { config } from '../../../config.js';
 
-export const MILESTONE_BONUSES: Record<number, number> = {
-    7: 1_000,
-    30: 5_000,
-    100: 25_000,
-    365: 100_000,
-};
+export const STREAK_TIME_ZONE = 'Europe/Madrid';
+export const STREAK_GRACE_PERIOD_MS = config.streaks.gracePeriodHours * 60 * 60 * 1000;
+export const DAILY_REWARD_BASE = config.economy.dailyReward.base;
+export const DAILY_REWARD_PER_STREAK_DAY = config.economy.dailyReward.perStreakDay;
+export const DAILY_REWARD_MAX = config.economy.dailyReward.max;
+export const MILESTONE_BONUSES: Record<number, number> = Object.fromEntries(
+    Object.entries(config.economy.milestoneBonuses).map(([days, bonus]) => [Number(days), bonus]),
+);
 
 export function getSpainDateKey(date: Date): string {
     const formatter = new Intl.DateTimeFormat('en-CA', {
@@ -28,7 +27,10 @@ export function getSpainDateKey(date: Date): string {
     return `${parts.year}-${parts.month}-${parts.day}`;
 }
 
-export function isConsecutiveDay(lastDateKey: string | null | undefined, todayDateKey: string): boolean {
+export function isConsecutiveDay(
+    lastDateKey: string | null | undefined,
+    todayDateKey: string,
+): boolean {
     if (!lastDateKey) return false;
 
     // Parse YYYY-MM-DD keys into Date objects at midnight UTC for consistent diffing
@@ -47,7 +49,10 @@ export function isWithinGracePeriod(lastStreakAt: Date | null | undefined, now: 
 }
 
 export function getDailyReward(streakDays: number): number {
-    return DAILY_REWARD_BASE + Math.max(0, streakDays) * DAILY_REWARD_PER_STREAK_DAY;
+    return Math.min(
+        DAILY_REWARD_MAX,
+        DAILY_REWARD_BASE + Math.max(0, streakDays) * DAILY_REWARD_PER_STREAK_DAY,
+    );
 }
 
 export function getNewMilestones(streakDays: number, claimedMilestones: number[]): number[] {

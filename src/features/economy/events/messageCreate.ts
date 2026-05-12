@@ -1,8 +1,9 @@
 import { Events, type Message } from 'discord.js';
 import economyService from '../services/economyService.js';
-import { QuestType } from '../services/questService.js';
+import questService, { QuestType } from '../services/questService.js';
+import { config } from '../../../config.js';
 
-const COOLDOWN_MS = 60 * 1000; // 1 minute
+const COOLDOWN_MS = config.economy.messageRewards.cooldownSeconds * 1000;
 const cooldowns = new Map<string, number>();
 
 export default {
@@ -17,8 +18,16 @@ export default {
 
         if (!lastMessage || now - lastMessage > COOLDOWN_MS) {
             // Award Pesetas
-            const amount = Math.floor(Math.random() * 5) + 1; // 1-5 Pesetas
-            await economyService.addBalance(message.author.id, amount);
+            const rewardConfig = config.economy.messageRewards;
+            const amount =
+                Math.floor(Math.random() * (rewardConfig.max - rewardConfig.min + 1)) +
+                rewardConfig.min;
+            await economyService.addCappedEarning(
+                message.author.id,
+                'MESSAGE',
+                amount,
+                rewardConfig.dailyCap,
+            );
 
             // Set cooldown
             cooldowns.set(message.author.id, now);
@@ -34,6 +43,7 @@ export default {
         if (!lastMessage || now - lastMessage > COOLDOWN_MS) {
             const userId = message.author.id;
             const channelId = message.channel.id;
+            if (questService.isExcludedQuestChannel(channelId)) return;
 
             // Check if user has a quest related to messages
             const quest = await economyService.getDailyQuest(userId, message.client as any);
@@ -49,7 +59,7 @@ export default {
 
                 if (updatedQuest && updatedQuest.isCompleted) {
                     await message.reply({
-                        content: `🎉 **Quest Completed!** ${updatedQuest.description}\nUse \`/daily\` to claim your reward!`,
+                        content: `🎉 **Tarea completada.** ${updatedQuest.description}\nUsa \`/daily\` para reclamar tu recompensa.`,
                     });
                 }
             }

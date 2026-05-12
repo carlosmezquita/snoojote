@@ -1,5 +1,6 @@
 import { ChannelType, type TextChannel } from 'discord.js';
 import { type DiscordBot } from '../../../core/client.js';
+import { config } from '../../../config.js';
 
 export enum QuestType {
     MESSAGE_COUNT = 'MESSAGE_COUNT',
@@ -17,6 +18,21 @@ export interface QuestData {
 }
 
 export class QuestService {
+    isExcludedQuestChannel(channelId: string | null | undefined): boolean {
+        return !!channelId && config.economy.questExcludedChannelIds.includes(channelId);
+    }
+
+    getGuidelines(quest: QuestData): string {
+        if (quest.type === QuestType.MESSAGE_COUNT) {
+            const target = quest.targetId
+                ? `<#${quest.targetId}>`
+                : 'cualquier canal de texto permitido';
+            return `Envía mensajes con contenido en ${target}. Los mensajes en canales excluidos no cuentan, y el progreso respeta el enfriamiento de recompensas.`;
+        }
+
+        return 'Permanece en un canal de voz permitido. El progreso cuenta minutos completos y se sincroniza al salir, al cambiar de canal de voz o al ejecutar `/daily` mientras sigues conectado.';
+    }
+
     // Generate a new random quest
     async generateQuest(client: DiscordBot): Promise<QuestData> {
         const types = [QuestType.MESSAGE_COUNT, QuestType.VOICE_TIME];
@@ -37,6 +53,7 @@ export class QuestService {
         const channels = client.channels.cache.filter(
             (c) =>
                 c.type === ChannelType.GuildText &&
+                !this.isExcludedQuestChannel(c.id) &&
                 !c.name.includes('log') &&
                 !c.name.includes('verify') &&
                 !c.name.includes('ticket'),
@@ -49,7 +66,7 @@ export class QuestService {
                 type: QuestType.MESSAGE_COUNT,
                 current: 0,
                 goal: 5,
-                description: 'Send 5 messages in any channel.',
+                description: 'Envía 5 mensajes en cualquier canal permitido.',
                 isCompleted: false,
             };
         }
@@ -65,18 +82,19 @@ export class QuestService {
             targetName: targetChannel.name,
             current: 0,
             goal: goal,
-            description: `Send ${goal} messages in <#${targetChannel.id}>`,
+            description: `Envía ${goal} mensajes en <#${targetChannel.id}>`,
             isCompleted: false,
         };
     }
 
     private generateVoiceQuest(): QuestData {
-        const goal = Math.floor(Math.random() * 10) + 10; // 10 to 20 minutes
+        const dailyCap = config.economy.voiceRewards.dailyCap;
+        const goal = Math.min(Math.floor(Math.random() * 10) + 10, dailyCap);
         return {
             type: QuestType.VOICE_TIME,
             current: 0,
             goal: goal, // stored in minutes for simplicity in display, but we might track internally differently
-            description: `Spend ${goal} minutes in any voice channel`,
+            description: `Pasa ${goal} minutos en cualquier canal de voz permitido`,
             isCompleted: false,
         };
     }

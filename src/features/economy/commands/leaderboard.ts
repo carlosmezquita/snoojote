@@ -4,25 +4,25 @@ import economyService from '../services/economyService.js';
 
 export const data = new SlashCommandBuilder()
     .setName('leaderboard')
-    .setDescription('Show the top 10 users by points.');
+    .setDescription('Muestra los 10 usuarios con más pesetas.');
 
 export const execute = async (interaction: ChatInputCommandInteraction, client: DiscordBot) => {
     const leaderboard = await economyService.getLeaderboard(10);
 
     const embed = new EmbedBuilder()
         .setColor(0xffd700)
-        .setTitle('🏆 Richest Users (Pesetas)')
+        .setTitle('🏆 Usuarios con más pesetas')
         .setTimestamp();
 
     let description = '';
     for (const [index, entry] of leaderboard.entries()) {
         const user = await client.users.fetch(entry.user_id).catch(() => null);
-        const username = user ? user.username : 'Unknown User';
+        const username = user ? user.username : 'Usuario desconocido';
         description += `${index + 1}. **${username}** - ${entry.points} ₧\n`;
     }
 
     if (description === '') {
-        description = 'No data yet.';
+        description = 'Todavía no hay datos.';
     }
 
     embed.setDescription(description);

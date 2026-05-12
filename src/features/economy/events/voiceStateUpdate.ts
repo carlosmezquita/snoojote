@@ -1,59 +1,84 @@
 import { Events, type VoiceState } from 'discord.js';
 import economyService from '../services/economyService.js';
-import { QuestType } from '../services/questService.js';
-
-// Map to store join times: userId -> timestamp
-const voiceJoins = new Map<string, number>();
+import questService, { QuestType } from '../services/questService.js';
+import { config } from '../../../config.js';
+import voiceSessionService from '../services/voiceSessionService.js';
+import { DMService } from '../../../shared/services/DMService.js';
 
 export default {
     name: Events.VoiceStateUpdate,
     once: false,
     async execute(oldState: VoiceState, newState: VoiceState) {
         const userId = newState.member?.id || oldState.member?.id;
-        if (!userId || newState.member?.user.bot) return;
+        const member = newState.member ?? oldState.member;
+        if (!userId || member?.user.bot) return;
 
         const now = Date.now();
-
-        // User Joined Voice (and wasn't in one before, or switched channels logic can be complex)
-        // Simple Logic: If joining a valid channel (not AFK)
-        const isJoining = !!newState.channelId && !oldState.channelId;
-        const isLeaving = !newState.channelId && !!oldState.channelId;
-        // Switching: oldState.channelId && newState.channelId
+        const oldChannelId = oldState.channelId;
+        const newChannelId = newState.channelId;
+        const isJoining = !!newChannelId && !oldChannelId;
+        const isLeaving = !newChannelId && !!oldChannelId;
+        const isSwitching = !!oldChannelId && !!newChannelId && oldChannelId !== newChannelId;
 
         if (isJoining) {
-            voiceJoins.set(userId, now);
-        } else if (isLeaving) {
-            const joinTime = voiceJoins.get(userId);
-            if (joinTime) {
-                const durationMs = now - joinTime;
-                const durationMinutes = Math.floor(durationMs / (1000 * 60));
-
-                if (durationMinutes >= 1) {
-                    // Award 1 Peseta per minute
-                    // Or 10 Pesetas every 10 mins (approx 1 per min)
-                    const reward = Math.floor(durationMinutes * 1);
-                    if (reward > 0) {
-                        await economyService.addBalance(userId, reward);
-                    }
-
-                    // Quest Progress
-                    const quest = await economyService.getDailyQuest(
-                        userId,
-                        newState.client as any,
-                    );
-                    if (quest && !quest.isCompleted && quest.type === QuestType.VOICE_TIME) {
-                        await economyService.updateQuestProgress(
-                            userId,
-                            QuestType.VOICE_TIME,
-                            durationMinutes,
-                        );
-                        // We can't reply to a voice state update, so maybe we rely on /daily to check status
-                        // Or send a DM (intrusive)
-                        // Or just let it be silent until they check
-                    }
-                }
-                voiceJoins.delete(userId);
+            if (!questService.isExcludedQuestChannel(newChannelId)) {
+                voiceSessionService.start(userId, newChannelId, now);
             }
+            return;
+        }
+
+        if (isSwitching) {
+            const elapsed = voiceSessionService.switchChannel(userId, newChannelId, now);
+            await applyVoiceMinutes(userId, elapsed?.channelId, elapsed?.minutes ?? 0, newState);
+
+            if (questService.isExcludedQuestChannel(newChannelId)) {
+                voiceSessionService.stop(userId, now);
+            }
+            return;
+        }
+
+        if (isLeaving) {
+            const elapsed = voiceSessionService.stop(userId, now);
+            await applyVoiceMinutes(userId, elapsed?.channelId, elapsed?.minutes ?? 0, oldState);
         }
     },
 };
+
+export async function applyVoiceMinutes(
+    userId: string,
+    channelId: string | null | undefined,
+    durationMinutes: number,
+    state: VoiceState,
+): Promise<void> {
+    if (durationMinutes < 1 || questService.isExcludedQuestChannel(channelId)) return;
+
+    const reward = Math.floor(durationMinutes * config.economy.voiceRewards.perMinute);
+    if (reward > 0) {
+        await economyService.addCappedEarning(
+            userId,
+            'VOICE',
+            reward,
+            config.economy.voiceRewards.dailyCap,
+        );
+    }
+
+    const quest = await economyService.getDailyQuest(userId, state.client as any);
+    if (!quest || quest.isCompleted || quest.type !== QuestType.VOICE_TIME) return;
+
+    const updatedQuest = await economyService.updateQuestProgress(
+        userId,
+        QuestType.VOICE_TIME,
+        durationMinutes,
+    );
+
+    if (updatedQuest?.isCompleted) {
+        const user = state.member?.user;
+        if (!user) return;
+
+        await DMService.sendSuccessWithFallback(
+            user,
+            'Tarea diaria completada',
+            `Tarea diaria completada: **${updatedQuest.description}**\nUsa \`/daily\` para reclamar tu recompensa.`,
+        );
+    }
+}

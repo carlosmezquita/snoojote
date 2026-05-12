@@ -1,6 +1,7 @@
 import { ChatGroq } from '@langchain/groq';
 import { ChatPromptTemplate, MessagesPlaceholder } from '@langchain/core/prompts';
 import { SystemMessage, type BaseMessage } from '@langchain/core/messages';
+import { config } from '../../../config.js';
 
 export class Agent {
     private chatGroq: ChatGroq;
@@ -8,16 +9,14 @@ export class Agent {
 
     constructor() {
         this.chatGroq = new ChatGroq({
-            maxTokens: 1024,
-            temperature: 0.7,
-            model: 'llama-3.1-8b-instant',
+            maxTokens: config.ai.maxTokens,
+            temperature: config.ai.temperature,
+            model: config.ai.model,
             apiKey: process.env.GROQ_API_KEY,
         });
 
         const prompt = ChatPromptTemplate.fromMessages([
-            new SystemMessage(
-                `You are a helpful AI assistant named Snoojote. You are chatting in a Discord server.`,
-            ), // Customizable system prompt
+            new SystemMessage(config.ai.systemPrompt),
             new MessagesPlaceholder('history'),
             ['human', '{input}'],
         ]);

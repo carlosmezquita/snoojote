@@ -3,11 +3,14 @@ import { glob } from 'glob';
 import { pathToFileURL } from 'url';
 import path from 'path';
 import { config } from '../config.js';
+import { assertBotConfigReady } from '../configLoader.js';
 import 'dotenv/config';
 
 const token = process.env.TOKEN;
 const clientId = config.clientId;
 const guildId = config.guildId;
+
+assertBotConfigReady();
 
 if (!token) {
     console.error('Missing TOKEN in .env');

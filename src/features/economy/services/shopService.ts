@@ -3,7 +3,7 @@ import { shopItems, userInventory } from '../../../database/schema.js';
 import { eq, and, asc } from 'drizzle-orm';
 import economyService from './economyService.js';
 import { type ChatInputCommandInteraction } from 'discord.js';
-import { shopCatalog } from '../shopConfig.js';
+import { shopCatalog, type ShopItemConfig } from '../shopConfig.js';
 
 export class ShopService {
     async getShopItems() {
@@ -47,6 +47,7 @@ export class ShopService {
 
         const userId = interaction.user.id;
         const isConsumable = item.type === 'CONSUMABLE';
+        const catalogItem = this.getCatalogItem(item.name);
 
         // Check Balance
         const balance = await economyService.getBalance(userId);
@@ -68,7 +69,15 @@ export class ShopService {
             return { success: false, message: 'Ya tienes este artículo.' };
         }
 
+        if (item.type === 'ROLE') {
+            const progressionResult = await this.validateRankProgression(userId, catalogItem);
+            if (!progressionResult.success) {
+                return progressionResult;
+            }
+        }
+
         // Process Role Assignment
+        let paid = false;
         if (item.type === 'ROLE') {
             const roleId = item.value;
             const member = interaction.member as any;
@@ -82,45 +91,123 @@ export class ShopService {
 
             try {
                 // Check if Role ID is the placeholder
-                if (roleId.startsWith('REPLACE')) {
+                if (roleId.startsWith('REPLACE') || roleId.includes('_HERE')) {
                     return {
                         success: false,
-                        message: '⚠️ Error: El ID del rol no está configurado en `shopConfig.ts`.',
+                        message:
+                            '⚠️ Error: El ID del rol no está configurado en `config/bot.config.json`.',
                     };
                 }
 
                 const role = interaction.guild.roles.cache.get(roleId);
 
-                if (role) {
-                    await member.roles.add(role);
-                } else {
+                if (!role) {
                     return {
                         success: false,
                         message: 'Error de configuración: El rol no existe en Discord.',
                     };
                 }
+
+                paid = await economyService.spendBalance(userId, item.price);
+                if (!paid) {
+                    return {
+                        success: false,
+                        message: `No tienes suficientes Pesetas. Necesitas **${item.price} ₧**.`,
+                    };
+                }
+
+                await member.roles.add(role);
             } catch (error) {
+                if (paid) {
+                    await economyService.addBalance(userId, item.price);
+                }
                 return {
                     success: false,
-                    message: 'No pude asignar el rol. Verifica mis permisos (Gestión de Roles).',
+                    message:
+                        'No pude asignar el rol. Se ha reembolsado la compra. Verifica mis permisos (Gestión de Roles).',
                 };
             }
         }
 
-        const paid = await economyService.spendBalance(userId, item.price);
         if (!paid) {
+            paid = await economyService.spendBalance(userId, item.price);
+            if (!paid) {
+                return {
+                    success: false,
+                    message: `No tienes suficientes Pesetas. Necesitas **${item.price} ₧**.`,
+                };
+            }
+        }
+
+        try {
+            await db.insert(userInventory).values({
+                userId,
+                itemId: item.id,
+            });
+        } catch (error) {
+            await economyService.addBalance(userId, item.price);
             return {
                 success: false,
-                message: `No tienes suficientes Pesetas. Necesitas **${item.price} ₧**.`,
+                message: 'No pude guardar la compra. Se ha reembolsado el importe.',
             };
         }
 
-        await db.insert(userInventory).values({
-            userId,
-            itemId: item.id,
-        });
-
         return { success: true, message: `¡Has comprado **${item.name}** por ${item.price} ₧!` };
+    }
+
+    private getCatalogItem(itemName: string): ShopItemConfig | undefined {
+        return shopCatalog.find((item) => item.name === itemName);
+    }
+
+    private async validateRankProgression(
+        userId: string,
+        catalogItem: ShopItemConfig | undefined,
+    ): Promise<{ success: boolean; message: string }> {
+        if (!catalogItem?.rankOrder || catalogItem.rankOrder <= 1) {
+            return { success: true, message: '' };
+        }
+
+        const previousRank = shopCatalog.find(
+            (candidate) =>
+                candidate.type === 'ROLE' && candidate.rankOrder === catalogItem.rankOrder! - 1,
+        );
+
+        if (!previousRank) {
+            return {
+                success: false,
+                message: 'Error de configuración: falta el rango anterior requerido.',
+            };
+        }
+
+        const previousDbItem = await db
+            .select()
+            .from(shopItems)
+            .where(eq(shopItems.name, previousRank.name))
+            .get();
+
+        if (!previousDbItem) {
+            return {
+                success: false,
+                message: 'Error de configuración: el rango anterior no existe en la tienda.',
+            };
+        }
+
+        const existingPreviousRank = await db
+            .select()
+            .from(userInventory)
+            .where(
+                and(eq(userInventory.userId, userId), eq(userInventory.itemId, previousDbItem.id)),
+            )
+            .get();
+
+        if (!existingPreviousRank) {
+            return {
+                success: false,
+                message: `Debes comprar **${previousRank.name}** antes de comprar **${catalogItem.name}**.`,
+            };
+        }
+
+        return { success: true, message: '' };
     }
 
     async seedItems() {

@@ -5,9 +5,9 @@ import { createEmbed, Colors } from '../../../shared/utils/embeds.js';
 
 export const data = new SlashCommandBuilder()
     .setName('balance')
-    .setDescription("Check your or another user's balance.")
+    .setDescription('Consulta tu saldo o el de otro usuario.')
     .addUserOption((option) =>
-        option.setName('user').setDescription('The user to check').setRequired(false),
+        option.setName('user').setDescription('Usuario que quieres consultar').setRequired(false),
     );
 
 export const execute = async (interaction: ChatInputCommandInteraction, client: DiscordBot) => {
@@ -15,7 +15,7 @@ export const execute = async (interaction: ChatInputCommandInteraction, client: 
     const balance = await economyService.getBalance(target.id);
 
     const embed = createEmbed(
-        `${target.username}'s Wallet`,
+        `Cartera de ${target.username}`,
         `💰 **${balance}** ₧ (Pesetas)`,
         Colors.Success,
     ).setTimestamp();

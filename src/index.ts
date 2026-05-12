@@ -1,6 +1,7 @@
 import 'dotenv/config';
 import { DiscordBot } from './core/client.js';
 import logger from './utils/logger.js';
+import { assertBotConfigReady } from './configLoader.js';
 
 const client = new DiscordBot();
 
@@ -22,6 +23,7 @@ void (async () => {
         if (!process.env.TOKEN) {
             throw new Error('TOKEN is not defined in .env');
         }
+        assertBotConfigReady();
         await client.start(process.env.TOKEN);
         logger.info(`Logged in as ${client.user?.tag}!`);
     } catch (error) {
