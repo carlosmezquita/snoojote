@@ -1,4 +1,5 @@
 export const STREAK_TIME_ZONE = 'Europe/Madrid';
+export const STREAK_GRACE_PERIOD_MS = 36 * 60 * 60 * 1000;
 export const DAILY_REWARD_BASE = 250;
 export const DAILY_REWARD_PER_STREAK_DAY = 5;
 
@@ -38,6 +39,11 @@ export function isConsecutiveDay(lastDateKey: string | null | undefined, todayDa
     const oneDayMs = 24 * 60 * 60 * 1000;
 
     return diffMs === oneDayMs;
+}
+
+export function isWithinGracePeriod(lastStreakAt: Date | null | undefined, now: Date): boolean {
+    if (!lastStreakAt) return false;
+    return now.getTime() - lastStreakAt.getTime() <= STREAK_GRACE_PERIOD_MS;
 }
 
 export function getDailyReward(streakDays: number): number {

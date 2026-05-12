@@ -9,6 +9,7 @@ import {
     getNewMilestones,
     getSpainDateKey,
     isConsecutiveDay,
+    isWithinGracePeriod,
     MILESTONE_BONUSES,
 } from './streakRules.js';
 
@@ -49,11 +50,16 @@ export class StreakService {
 
         const claimedMilestones = this.parseClaimedMilestones(userStreak.claimedMilestones);
         const lastStreakDate = userStreak.lastStreakDate;
+        const lastStreakAt =
+            userStreak.lastStreakAt ?? this.dateFromLegacyValue(userStreak.lastStreakDate);
+
         const isConsecutive = isConsecutiveDay(lastStreakDate, todayKey);
+        const maintainedByGrace = isWithinGracePeriod(lastStreakAt, now);
+
         let usedFreeze = false;
         let newStreak = 1;
 
-        if (isConsecutive) {
+        if (isConsecutive || maintainedByGrace) {
             newStreak = userStreak.streak + 1;
         } else if (await this.consumeStreakFreeze(message.author.id)) {
             usedFreeze = true;
