@@ -81,7 +81,7 @@ export class StreakService {
             await economyService.addBalance(message.author.id, MILESTONE_BONUSES[milestone]);
         }
 
-        await message.react(newStreak > 1 ? '🔥' : '✅');
+        await message.react('🔥');
         await this.sendBotMessage(
             client,
             this.buildStreakMessage(message, newStreak, usedFreeze, newMilestones),
@@ -105,7 +105,7 @@ export class StreakService {
             claimedMilestones: newMilestones,
         });
 
-        await message.react('✅');
+        await message.react('🔥');
         await this.sendBotMessage(
             client,
             `¡Hola ${message.author.toString()}!\n\nHas empezado tu primera racha. Ahora cualquier mensaje significativo en canales generales cuenta como check-in diario.`,
