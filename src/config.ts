@@ -20,6 +20,7 @@ const envSchema = z.object({
     ROLE_SUSPECT: z.string().min(1, 'ROLE_SUSPECT is required'),
     ROLE_MOD: z.string().min(1, 'ROLE_MOD is required'),
     ROLE_SUPPORT: z.string().min(1, 'ROLE_SUPPORT is required'),
+    ROLE_TICKET_MANAGER: z.string().min(1, 'ROLE_TICKET_MANAGER is required'),
     ROLE_RPLACE: z.string().min(1, 'ROLE_RPLACE is required'),
     ROLE_LINK_WHITELIST_IDS: z.string().min(1, 'ROLE_LINK_WHITELIST_IDS is required'),
     MAX_OPEN_TICKETS_PER_USER: z.coerce.number().int().positive().default(3),
@@ -73,8 +74,5 @@ export const config = {
             .split(',')
             .map((id) => id.trim())
             .filter(Boolean),
-    },
-};
-   .filter(Boolean),
     },
 };
