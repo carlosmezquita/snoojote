@@ -59,15 +59,10 @@ export const execute = async (interaction: ChatInputCommandInteraction, client: 
     // Show Quest Status
     const percentage = Math.min(100, Math.floor((quest.current / quest.goal) * 100));
     const progressBar = createProgressBar(quest.current, quest.goal);
-    const excludedChannels = config.economy.questExcludedChannelIds;
-    const excludedLine =
-        excludedChannels.length > 0
-            ? `\n\n**Canales excluidos**: ${excludedChannels.map((id) => `<#${id}>`).join(', ')}`
-            : '';
 
     const embed = createEmbed(
         'Tarea diaria',
-        `**Tarea**: ${quest.description}\n\n**Progreso**: ${quest.current}/${quest.goal}\n${progressBar} ${percentage}%\n\n**Cómo completarla**: ${questService.getGuidelines(quest)}${excludedLine}\n\nCompleta esta tarea para reclamar tu recompensa diaria de **${currentReward} ₧**.`,
+        `**Tarea**: ${quest.description}\n\n**Progreso**: ${quest.current}/${quest.goal}\n${progressBar} ${percentage}%\n\n**Cómo completarla**: ${questService.getGuidelines(quest)}\n\nCompleta esta tarea para reclamar tu recompensa diaria de **${currentReward} ₧**.`,
         Colors.Info,
     );
 
