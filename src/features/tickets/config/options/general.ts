@@ -7,6 +7,8 @@ import {
 } from 'discord.js';
 import { type TicketOptionConfig } from '../TicketConfig.js';
 
+import { config } from '../../../../config.js';
+
 export const generalTicket: TicketOptionConfig = {
     id: 'general',
     name: 'Asistencia General',
@@ -15,11 +17,11 @@ export const generalTicket: TicketOptionConfig = {
     label: 'General',
     buttonStyle: ButtonStyle.Secondary,
 
-    adminRoles: ['1118642400357777579'], // Adjust roles as needed
+    adminRoles: [config.roles.support, config.roles.mod],
     readOnlyRoles: [],
 
-    channelPrefix: 'general-',
-    categoryId: '1118644187181633707', // Adjust category ID as needed
+    channelPrefix: 'asistencia-',
+    categoryId: config.channels.ticketCategory,
 
     openMessage: '¡Has iniciado una solicitud de asistencia General!',
     ticketWelcomeMessage:
@@ -32,7 +34,7 @@ export const generalTicket: TicketOptionConfig = {
 
     pingHere: false,
     pingEveryone: false,
-    pingCustomRoleId: '1131596076097474731', // Adjust role ID as needed
+    pingCustomRoleId: config.roles.ticketManager,
 
     modal: new ModalBuilder()
         .setCustomId('ticket_modal_general')

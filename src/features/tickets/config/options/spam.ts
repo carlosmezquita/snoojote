@@ -7,6 +7,8 @@ import {
 } from 'discord.js';
 import { type TicketOptionConfig } from '../TicketConfig.js';
 
+import { config } from '../../../../config.js';
+
 export const spamTicket: TicketOptionConfig = {
     id: 'spam',
     name: 'Reporte de Spam',
@@ -15,11 +17,11 @@ export const spamTicket: TicketOptionConfig = {
     label: 'Spam',
     buttonStyle: ButtonStyle.Secondary,
 
-    adminRoles: ['1118642400357777579'],
+    adminRoles: [config.roles.mod, config.roles.support],
     readOnlyRoles: [],
 
     channelPrefix: 'spam-',
-    categoryId: '1118644187181633707',
+    categoryId: config.channels.ticketCategory,
 
     openMessage: '¡Has iniciado un reporte de Spam!',
     ticketWelcomeMessage:
@@ -32,7 +34,7 @@ export const spamTicket: TicketOptionConfig = {
 
     pingHere: false,
     pingEveryone: false,
-    pingCustomRoleId: '1131596076097474731',
+    pingCustomRoleId: config.roles.ticketManager,
 
     modal: new ModalBuilder()
         .setCustomId('ticket_modal_spam')

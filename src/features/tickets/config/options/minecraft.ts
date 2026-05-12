@@ -7,6 +7,8 @@ import {
 } from 'discord.js';
 import { type TicketOptionConfig } from '../TicketConfig.js';
 
+import { config } from '../../../../config.js';
+
 export const minecraftTicket: TicketOptionConfig = {
     id: 'minecraft',
     name: 'Asistencia Minecraft',
@@ -15,11 +17,11 @@ export const minecraftTicket: TicketOptionConfig = {
     label: 'Minecraft',
     buttonStyle: ButtonStyle.Secondary,
 
-    adminRoles: ['1118642400357777579'],
+    adminRoles: [config.roles.support, config.roles.mod],
     readOnlyRoles: [],
 
     channelPrefix: 'mc-',
-    categoryId: '1118644187181633707',
+    categoryId: config.channels.ticketCategory,
 
     openMessage: '¡Has iniciado una solicitud de asistencia para Minecraft!',
     ticketWelcomeMessage:
@@ -32,7 +34,7 @@ export const minecraftTicket: TicketOptionConfig = {
 
     pingHere: false,
     pingEveryone: false,
-    pingCustomRoleId: '1131596076097474731',
+    pingCustomRoleId: config.roles.ticketManager,
 
     modal: new ModalBuilder()
         .setCustomId('ticket_modal_minecraft')

@@ -7,6 +7,8 @@ import {
 } from 'discord.js';
 import { type TicketOptionConfig } from '../TicketConfig.js';
 
+import { config } from '../../../../config.js';
+
 export const rplaceTicket: TicketOptionConfig = {
     id: 'rplace',
     name: 'Asistencia rPlace',
@@ -15,11 +17,11 @@ export const rplaceTicket: TicketOptionConfig = {
     label: 'rPlace',
     buttonStyle: ButtonStyle.Secondary,
 
-    adminRoles: ['1118642400357777579'],
+    adminRoles: [config.roles.support, config.roles.mod],
     readOnlyRoles: [],
 
     channelPrefix: 'rplace-',
-    categoryId: '1118644187181633707',
+    categoryId: config.channels.ticketCategory,
 
     openMessage: '¡Has iniciado una solicitud de asistencia para rPlace en rSpain!',
     ticketWelcomeMessage:
@@ -32,7 +34,7 @@ export const rplaceTicket: TicketOptionConfig = {
 
     pingHere: false,
     pingEveryone: false,
-    pingCustomRoleId: '1131596076097474731',
+    pingCustomRoleId: config.roles.ticketManager,
 
     modal: new ModalBuilder()
         .setCustomId('ticket_modal_rplace')
