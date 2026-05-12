@@ -50,6 +50,7 @@ export const config = {
         suspect: env.ROLE_SUSPECT,
         mod: env.ROLE_MOD,
         support: env.ROLE_SUPPORT,
+        ticketManager: env.ROLE_TICKET_MANAGER,
         rPlace: env.ROLE_RPLACE,
         linkWhitelist: env.ROLE_LINK_WHITELIST_IDS.split(',').map((id) => id.trim()),
     },
@@ -72,5 +73,8 @@ export const config = {
             .split(',')
             .map((id) => id.trim())
             .filter(Boolean),
+    },
+};
+   .filter(Boolean),
     },
 };
