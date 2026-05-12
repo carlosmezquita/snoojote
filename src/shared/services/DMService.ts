@@ -5,8 +5,10 @@ import {
     type ColorResolvable,
     type AttachmentBuilder,
     type Attachment,
+    type TextChannel,
 } from 'discord.js';
 import { Colors } from '../utils/embeds.js';
+import { config } from '../../config.js';
 
 export enum DMType {
     Info = 'info',
@@ -28,10 +30,55 @@ export interface DMOptions {
     files?: (AttachmentBuilder | Attachment | string)[];
 }
 
+export interface DMWithFallbackOptions extends DMOptions {
+    fallbackChannelId?: string;
+    fallbackContent?: string;
+}
+
+export interface DMDeliveryResult {
+    dmSent: boolean;
+    fallbackSent: boolean;
+}
+
 export class DMService {
     public static async send(options: DMOptions): Promise<boolean> {
         const { user, type, title, description, fields, footer, timestamp = true, files } = options;
 
+        const embed = this.buildEmbed({ type, title, description, fields, footer, timestamp });
+
+        try {
+            await user.send({ embeds: [embed], files: files });
+            return true;
+        } catch (error) {
+            // Cannot DM user (blocked, closed DMs, etc.)
+            // We swallow the error here as we often can't do anything about it
+            // but return false so the caller knows it failed.
+            return false;
+        }
+    }
+
+    public static async sendWithFallback(
+        options: DMWithFallbackOptions,
+    ): Promise<DMDeliveryResult> {
+        const { user, files } = options;
+        const embed = this.buildEmbed(options);
+
+        try {
+            await user.send({ embeds: [embed], files });
+            return { dmSent: true, fallbackSent: false };
+        } catch (error) {
+            const fallbackSent = await this.sendFallback(user, embed, options);
+            return { dmSent: false, fallbackSent };
+        }
+    }
+
+    private static buildEmbed(
+        options: Pick<
+            DMOptions,
+            'type' | 'title' | 'description' | 'fields' | 'footer' | 'timestamp'
+        >,
+    ): EmbedBuilder {
+        const { type, title, description, fields, footer, timestamp = true } = options;
         const color = this.getColorByType(type);
 
         const embed = new EmbedBuilder()
@@ -57,13 +104,31 @@ export class DMService {
             embed.setTimestamp();
         }
 
+        return embed;
+    }
+
+    private static async sendFallback(
+        user: User,
+        embed: EmbedBuilder,
+        options: DMWithFallbackOptions,
+    ): Promise<boolean> {
+        const fallbackChannelId = options.fallbackChannelId || config.channels.bot;
+        const fallbackChannel = (await user.client.channels
+            .fetch(fallbackChannelId)
+            .catch(() => null)) as TextChannel | null;
+
+        if (!fallbackChannel || !fallbackChannel.isTextBased()) return false;
+
         try {
-            await user.send({ embeds: [embed], files: files });
+            await fallbackChannel.send({
+                content:
+                    options.fallbackContent ||
+                    `${user.toString()} no he podido enviarte esta notificación por MD, así que la publico aquí.`,
+                embeds: [embed],
+                files: options.files,
+            });
             return true;
         } catch (error) {
-            // Cannot DM user (blocked, closed DMs, etc.)
-            // We swallow the error here as we often can't do anything about it
-            // but return false so the caller knows it failed.
             return false;
         }
     }
@@ -97,6 +162,15 @@ export class DMService {
         return this.send({ user, type: DMType.Info, title, description, fields });
     }
 
+    public static async sendInfoWithFallback(
+        user: User,
+        title: string,
+        description: string,
+        fields?: APIEmbedField[],
+    ) {
+        return this.sendWithFallback({ user, type: DMType.Info, title, description, fields });
+    }
+
     public static async sendSuccess(
         user: User,
         title: string,
@@ -106,6 +180,15 @@ export class DMService {
         return this.send({ user, type: DMType.Success, title, description, fields });
     }
 
+    public static async sendSuccessWithFallback(
+        user: User,
+        title: string,
+        description: string,
+        fields?: APIEmbedField[],
+    ) {
+        return this.sendWithFallback({ user, type: DMType.Success, title, description, fields });
+    }
+
     public static async sendWarning(
         user: User,
         title: string,
@@ -113,6 +196,15 @@ export class DMService {
         fields?: APIEmbedField[],
     ) {
         return this.send({ user, type: DMType.Warning, title, description, fields });
+    }
+
+    public static async sendWarningWithFallback(
+        user: User,
+        title: string,
+        description: string,
+        fields?: APIEmbedField[],
+    ) {
+        return this.sendWithFallback({ user, type: DMType.Warning, title, description, fields });
     }
 
     public static async sendSanction(
@@ -133,6 +225,15 @@ export class DMService {
         return this.send({ user, type: DMType.Gift, title, description, fields });
     }
 
+    public static async sendGiftWithFallback(
+        user: User,
+        title: string,
+        description: string,
+        fields?: APIEmbedField[],
+    ) {
+        return this.sendWithFallback({ user, type: DMType.Gift, title, description, fields });
+    }
+
     public static async sendNeutral(
         user: User,
         title: string,
@@ -140,5 +241,14 @@ export class DMService {
         fields?: APIEmbedField[],
     ) {
         return this.send({ user, type: DMType.Neutral, title, description, fields });
+    }
+
+    public static async sendNeutralWithFallback(
+        user: User,
+        title: string,
+        description: string,
+        fields?: APIEmbedField[],
+    ) {
+        return this.sendWithFallback({ user, type: DMType.Neutral, title, description, fields });
     }
 }

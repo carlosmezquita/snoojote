@@ -52,36 +52,20 @@ A robust Discord bot built with TypeScript, Bun, and Discord.js, featuring econo
 
 ### Environment Variables
 
-Copy `.env.example` to `.env` and fill in all required Discord IDs and secrets:
+Copy `.env.example` to `.env` and fill in the secrets:
 
 ```env
 TOKEN=your_discord_bot_token_here
 GROQ_API_KEY=your_groq_api_key_here
-
-DISCORD_CLIENT_ID=your_discord_application_client_id
-DISCORD_GUILD_ID=optional_guild_id_for_fast_command_deploys
-
-CHANNEL_MAIN=channel_id
-CHANNEL_ALERTS=channel_id
-CHANNEL_STREAKS=channel_id
-CHANNEL_BOT=channel_id
-CHANNEL_LOGS=channel_id
-CHANNEL_WELCOME=channel_id
-CHANNEL_VERIFIER_CATEGORY=category_id
-CHANNEL_TICKET_CATEGORY=category_id
-CHANNEL_STARBOARD=channel_id
-CHANNEL_AI=channel_id
-CHANNEL_WORD_OF_THE_DAY=channel_id
-
-ROLE_DAILY_PING=role_id
-ROLE_SUSPECT=role_id
-ROLE_MOD=role_id
-ROLE_SUPPORT=role_id
-ROLE_RPLACE=role_id
-ROLE_LINK_WHITELIST_IDS=role_id,role_id
 ```
 
-The bot validates these variables at startup and exits with a non-zero status if required values are missing.
+Non-secret runtime settings live in `config/bot.config.json`. On first startup, the bot copies
+`config/bot.config.example.json` to `config/bot.config.json`; edit the generated file with your
+Discord IDs, AI prompt/model settings, economy rewards/caps, and shop role IDs. The generated file
+is ignored by Git, while the example stays committed.
+
+The bot validates `.env` and `config/bot.config.json` at startup and exits with a non-zero status if
+required values are missing or still use placeholders.
 
 ## Running the Bot
 

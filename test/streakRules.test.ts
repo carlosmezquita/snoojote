@@ -20,8 +20,9 @@ describe('streakRules', () => {
     });
 
     test('calculates progressive daily reward', () => {
-        expect(getDailyReward(0)).toBe(250);
-        expect(getDailyReward(100)).toBe(750);
+        expect(getDailyReward(0)).toBe(150);
+        expect(getDailyReward(100)).toBe(350);
+        expect(getDailyReward(500)).toBe(500);
     });
 
     test('returns only newly reached milestone bonuses', () => {

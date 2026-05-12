@@ -2,14 +2,20 @@ import { SlashCommandBuilder, type ChatInputCommandInteraction } from 'discord.j
 import { type DiscordBot } from '../../../core/client.js';
 import economyService from '../services/economyService.js';
 import { createEmbed, Colors } from '../../../shared/utils/embeds.js';
+import questService, { QuestType } from '../services/questService.js';
+import voiceSessionService from '../services/voiceSessionService.js';
+import { applyVoiceMinutes } from '../events/voiceStateUpdate.js';
+import { config } from '../../../config.js';
 
 export const data = new SlashCommandBuilder()
     .setName('daily')
-    .setDescription('Check your daily quest or claim your reward.');
+    .setDescription('Consulta tu tarea diaria o reclama tu recompensa.');
 
 export const execute = async (interaction: ChatInputCommandInteraction, client: DiscordBot) => {
     // 1. Get current quest (this also ensures one exists for the day)
-    const quest = await economyService.getDailyQuest(interaction.user.id, client);
+    let quest = await economyService.getDailyQuest(interaction.user.id, client);
+    await syncActiveVoiceQuestProgress(interaction, quest.type);
+    quest = await economyService.getDailyQuest(interaction.user.id, client);
     const currentReward = await economyService.getCurrentDailyReward(interaction.user.id);
 
     // 2. Try to claim (checks 24h cooldown AND completion)
@@ -28,8 +34,8 @@ export const execute = async (interaction: ChatInputCommandInteraction, client: 
 
     if (claimResult.success) {
         const embed = createEmbed(
-            'Daily Reward Claimed!',
-            `🎉 You have completed your daily quest:\n**${quest.description}**\n\nReward: **${claimResult.reward}** ₧`,
+            'Recompensa diaria reclamada',
+            `🎉 Has completado tu tarea diaria:\n**${quest.description}**\n\nRecompensa: **${claimResult.reward}** ₧`,
             Colors.Success,
         );
         await interaction.reply({ embeds: [embed], ephemeral: true });
@@ -39,10 +45,10 @@ export const execute = async (interaction: ChatInputCommandInteraction, client: 
     // Handling Failure Cases
 
     // Case 1: Already claimed
-    if (claimResult.message.includes('Already claimed')) {
+    if (claimResult.message.includes('Ya reclamada')) {
         const embed = createEmbed(
-            'Daily Reward',
-            `You have already claimed your reward for tody.\n${claimResult.message}`,
+            'Recompensa diaria',
+            `Ya has reclamado tu recompensa de hoy.\n${claimResult.message}`,
             Colors.Warning,
         );
         await interaction.reply({ embeds: [embed], ephemeral: true });
@@ -53,15 +59,51 @@ export const execute = async (interaction: ChatInputCommandInteraction, client: 
     // Show Quest Status
     const percentage = Math.min(100, Math.floor((quest.current / quest.goal) * 100));
     const progressBar = createProgressBar(quest.current, quest.goal);
+    const excludedChannels = config.economy.questExcludedChannelIds;
+    const excludedLine =
+        excludedChannels.length > 0
+            ? `\n\n**Canales excluidos**: ${excludedChannels.map((id) => `<#${id}>`).join(', ')}`
+            : '';
 
     const embed = createEmbed(
-        'Daily Quest',
-        `**Quest**: ${quest.description}\n\n**Progress**: ${quest.current}/${quest.goal}\n${progressBar} ${percentage}%\n\nComplete this quest to claim your **${currentReward} ₧** daily reward!`,
+        'Tarea diaria',
+        `**Tarea**: ${quest.description}\n\n**Progreso**: ${quest.current}/${quest.goal}\n${progressBar} ${percentage}%\n\n**Cómo completarla**: ${questService.getGuidelines(quest)}${excludedLine}\n\nCompleta esta tarea para reclamar tu recompensa diaria de **${currentReward} ₧**.`,
         Colors.Info,
     );
 
     await interaction.reply({ embeds: [embed], ephemeral: true });
 };
+
+async function syncActiveVoiceQuestProgress(
+    interaction: ChatInputCommandInteraction,
+    questType: QuestType,
+): Promise<void> {
+    if (questType !== QuestType.VOICE_TIME || !interaction.guild) return;
+
+    const member =
+        interaction.guild.members.cache.get(interaction.user.id) ??
+        (await interaction.guild.members.fetch(interaction.user.id).catch(() => null));
+    if (!member) return;
+
+    const channelId = member.voice.channelId;
+    if (!channelId || questService.isExcludedQuestChannel(channelId)) return;
+
+    const activeSession = voiceSessionService.getSession(interaction.user.id);
+    if (!activeSession) {
+        voiceSessionService.start(interaction.user.id, channelId);
+        return;
+    }
+
+    const elapsed = voiceSessionService.collectElapsed(interaction.user.id);
+    if (elapsed?.minutes) {
+        await applyVoiceMinutes(
+            interaction.user.id,
+            elapsed.channelId,
+            elapsed.minutes,
+            member.voice,
+        );
+    }
+}
 
 function createProgressBar(current: number, goal: number, size: number = 10): string {
     const progress = Math.min(current / goal, 1);

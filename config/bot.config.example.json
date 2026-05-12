@@ -1,0 +1,139 @@
+{
+    "discord": {
+        "clientId": "DISCORD_CLIENT_ID_HERE"
+    },
+    "channels": {
+        "main": "CHANNEL_MAIN_ID_HERE",
+        "alerts": "CHANNEL_ALERTS_ID_HERE",
+        "streaks": "CHANNEL_STREAKS_ID_HERE",
+        "bot": "CHANNEL_BOT_ID_HERE",
+        "logs": "CHANNEL_LOGS_ID_HERE",
+        "welcome": "CHANNEL_WELCOME_ID_HERE",
+        "verifierCategory": "CHANNEL_VERIFIER_CATEGORY_ID_HERE",
+        "ticketCategory": "CHANNEL_TICKET_CATEGORY_ID_HERE",
+        "starboard": "CHANNEL_STARBOARD_ID_HERE",
+        "ai": "CHANNEL_AI_ID_HERE",
+        "wordOfTheDay": "CHANNEL_WORD_OF_THE_DAY_ID_HERE"
+    },
+    "roles": {
+        "dailyPing": "ROLE_DAILY_PING_ID_HERE",
+        "suspect": "ROLE_SUSPECT_ID_HERE",
+        "mod": "ROLE_MOD_ID_HERE",
+        "support": "ROLE_SUPPORT_ID_HERE",
+        "ticketManager": "ROLE_TICKET_MANAGER_ID_HERE",
+        "rPlace": "ROLE_RPLACE_ID_HERE",
+        "linkWhitelist": []
+    },
+    "links": {
+        "whitelist": [
+            "https://tenor.com/view/",
+            "https://media.discordapp.net/",
+            "https://cdn.discordapp.com/"
+        ]
+    },
+    "starboard": {
+        "emojis": ["🤡", "⭐"],
+        "minReactions": 3
+    },
+    "tickets": {
+        "maxOpenPerUser": 3
+    },
+    "streaks": {
+        "channelIds": ["CHANNEL_STREAKS_ID_HERE", "CHANNEL_MAIN_ID_HERE"],
+        "gracePeriodHours": 36
+    },
+    "ai": {
+        "model": "llama-3.1-8b-instant",
+        "maxTokens": 1024,
+        "temperature": 0.7,
+        "systemPrompt": "Eres Snoojote, un asistente útil en un servidor de Discord. Responde primero en español castellano salvo que el usuario pida otro idioma."
+    },
+    "economy": {
+        "messageRewards": {
+            "min": 1,
+            "max": 5,
+            "cooldownSeconds": 60,
+            "dailyCap": 125
+        },
+        "voiceRewards": {
+            "perMinute": 1,
+            "dailyCap": 150
+        },
+        "questExcludedChannelIds": [],
+        "dailyReward": {
+            "base": 150,
+            "perStreakDay": 2,
+            "max": 500
+        },
+        "milestoneBonuses": {
+            "7": 1000,
+            "30": 5000,
+            "100": 25000,
+            "365": 100000
+        },
+        "shopCatalog": [
+            {
+                "name": "Seguro de Racha",
+                "description": "Protege automáticamente tu racha la próxima vez que olvides fichar.",
+                "price": 10000,
+                "type": "CONSUMABLE",
+                "value": "STREAK_FREEZE",
+                "emoji": "🧊"
+            },
+            {
+                "name": "Hidalgo",
+                "description": "Un título noble de baja alcurnia.",
+                "price": 1000,
+                "type": "ROLE",
+                "value": "ROLE_HIDALGO_ID_HERE",
+                "emoji": "🗡️",
+                "rankOrder": 1
+            },
+            {
+                "name": "Conquistador",
+                "description": "Explorador y líder de expediciones.",
+                "price": 5000,
+                "type": "ROLE",
+                "value": "ROLE_CONQUISTADOR_ID_HERE",
+                "emoji": "🗺️",
+                "rankOrder": 2
+            },
+            {
+                "name": "Capitán General",
+                "description": "Comandante supremo de los ejércitos reales.",
+                "price": 15000,
+                "type": "ROLE",
+                "value": "ROLE_CAPITAN_GENERAL_ID_HERE",
+                "emoji": "⚔️",
+                "rankOrder": 3
+            },
+            {
+                "name": "Gobernador",
+                "description": "Administrador de una provincia.",
+                "price": 50000,
+                "type": "ROLE",
+                "value": "ROLE_GOBERNADOR_ID_HERE",
+                "emoji": "📜",
+                "rankOrder": 4
+            },
+            {
+                "name": "Virrey",
+                "description": "Representante del rey en tierras lejanas.",
+                "price": 200000,
+                "type": "ROLE",
+                "value": "ROLE_VIRREY_ID_HERE",
+                "emoji": "👑",
+                "rankOrder": 5
+            },
+            {
+                "name": "Grande de España",
+                "description": "La más alta dignidad de la nobleza.",
+                "price": 500000,
+                "type": "ROLE",
+                "value": "ROLE_GRANDE_DE_ESPANA_ID_HERE",
+                "emoji": "🦁",
+                "rankOrder": 6
+            }
+        ]
+    }
+}

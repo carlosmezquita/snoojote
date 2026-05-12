@@ -1,4 +1,4 @@
-import { sqliteTable, integer, text, index } from 'drizzle-orm/sqlite-core';
+import { sqliteTable, integer, text, index, uniqueIndex } from 'drizzle-orm/sqlite-core';
 import { sql } from 'drizzle-orm';
 
 export const tickets = sqliteTable(
@@ -45,6 +45,24 @@ export const users = sqliteTable('users', {
     lastDaily: integer('last_daily', { mode: 'timestamp' }),
     lastActivityDate: integer('last_activity_date', { mode: 'timestamp' }),
 });
+
+export const economyDailyEarnings = sqliteTable(
+    'economy_daily_earnings',
+    {
+        id: integer('id').primaryKey({ autoIncrement: true }),
+        userId: text('user_id').notNull(),
+        dateKey: text('date_key').notNull(),
+        source: text('source').notNull(),
+        amount: integer('amount').default(0).notNull(),
+    },
+    (table) => ({
+        userDateSourceIdx: uniqueIndex('economy_daily_user_date_source_idx').on(
+            table.userId,
+            table.dateKey,
+            table.source,
+        ),
+    }),
+);
 
 export const starboardMessages = sqliteTable(
     'starboard_messages',

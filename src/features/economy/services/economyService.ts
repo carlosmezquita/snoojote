@@ -1,9 +1,21 @@
 import db from '../../../database/db.js';
-import { streaks, users } from '../../../database/schema.js';
+import { economyDailyEarnings, streaks, users } from '../../../database/schema.js';
 import { eq, sql, desc, and } from 'drizzle-orm';
 import questService, { type QuestData } from './questService.js';
 import { type DiscordBot } from '../../../core/client.js';
-import { getDailyReward } from '../../streaks/services/streakRules.js';
+import { getDailyReward, getSpainDateKey } from '../../streaks/services/streakRules.js';
+
+export type EconomyEarningSource = 'MESSAGE' | 'VOICE';
+
+export function calculateCappedEarning(
+    currentAmount: number,
+    requestedAmount: number,
+    dailyCap: number,
+): number {
+    if (requestedAmount <= 0 || dailyCap <= 0) return 0;
+    const remaining = Math.max(0, dailyCap - currentAmount);
+    return Math.min(requestedAmount, remaining);
+}
 
 export class EconomyService {
     async getBalance(userId: string): Promise<number> {
@@ -23,6 +35,61 @@ export class EconomyService {
                 target: users.userId,
                 set: { points: sql`${users.points} + ${amount}` },
             });
+    }
+
+    async addCappedEarning(
+        userId: string,
+        source: EconomyEarningSource,
+        amount: number,
+        dailyCap: number,
+        now: Date = new Date(),
+    ): Promise<number> {
+        if (amount <= 0 || dailyCap <= 0) return 0;
+
+        return db.transaction((tx) => {
+            const dateKey = getSpainDateKey(now);
+            const existing = tx
+                .select()
+                .from(economyDailyEarnings)
+                .where(
+                    and(
+                        eq(economyDailyEarnings.userId, userId),
+                        eq(economyDailyEarnings.dateKey, dateKey),
+                        eq(economyDailyEarnings.source, source),
+                    ),
+                )
+                .get();
+
+            const currentAmount = existing?.amount ?? 0;
+            const creditedAmount = calculateCappedEarning(currentAmount, amount, dailyCap);
+            if (creditedAmount <= 0) return 0;
+
+            tx.insert(users)
+                .values({ userId, points: creditedAmount })
+                .onConflictDoUpdate({
+                    target: users.userId,
+                    set: { points: sql`${users.points} + ${creditedAmount}` },
+                })
+                .run();
+
+            if (existing) {
+                tx.update(economyDailyEarnings)
+                    .set({ amount: currentAmount + creditedAmount })
+                    .where(eq(economyDailyEarnings.id, existing.id))
+                    .run();
+            } else {
+                tx.insert(economyDailyEarnings)
+                    .values({
+                        userId,
+                        dateKey,
+                        source,
+                        amount: creditedAmount,
+                    })
+                    .run();
+            }
+
+            return creditedAmount;
+        });
     }
 
     async spendBalance(userId: string, amount: number): Promise<boolean> {
@@ -187,7 +254,7 @@ export class EconomyService {
         try {
             return db.transaction((tx) => {
                 const user = tx.select().from(users).where(eq(users.userId, userId)).get();
-                if (!user) return { success: false, message: 'User not found.' };
+                if (!user) return { success: false, message: 'Usuario no encontrado.' };
 
                 const now = new Date();
                 const lastDaily = user.lastDaily;
@@ -201,7 +268,7 @@ export class EconomyService {
                         const m = Math.floor((remaining - h) * 60);
                         return {
                             success: false,
-                            message: `Already claimed. Try again in ${h}h ${m}m.`,
+                            message: `Ya reclamada. Vuelve a intentarlo en ${h}h ${m}m.`,
                         };
                     }
                 }
@@ -209,7 +276,7 @@ export class EconomyService {
                 const quest = user.dailyQuest as QuestData;
 
                 if (!quest || !quest.isCompleted) {
-                    return { success: false, message: 'Daily Quest not completed yet!' };
+                    return { success: false, message: 'La tarea diaria aún no está completada.' };
                 }
 
                 const userStreak = tx
@@ -243,18 +310,21 @@ export class EconomyService {
                     tx.rollback();
                     return {
                         success: false,
-                        message: 'Failed to claim, possible concurrent request.',
+                        message: 'No se pudo reclamar, posible solicitud simultánea.',
                     };
                 }
 
-                return { success: true, message: 'Daily reward claimed!', reward };
+                return { success: true, message: 'Recompensa diaria reclamada.', reward };
             });
         } catch (e) {
             if (e instanceof Error && e.message.includes('Rollback')) {
-                return { success: false, message: 'Failed to claim, possible concurrent request.' };
+                return {
+                    success: false,
+                    message: 'No se pudo reclamar, posible solicitud simultánea.',
+                };
             }
             console.error('Claim Daily transaction failed:', e);
-            return { success: false, message: 'An error occurred.' };
+            return { success: false, message: 'Ha ocurrido un error.' };
         }
     }
 }
