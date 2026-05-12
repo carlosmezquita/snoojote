@@ -1,5 +1,12 @@
-import { SlashCommandBuilder, ChatInputCommandInteraction, ActionRowBuilder, ButtonBuilder, ButtonStyle, TextChannel } from 'discord.js';
-import { DiscordBot } from '../../../core/client.js';
+import {
+    SlashCommandBuilder,
+    type ChatInputCommandInteraction,
+    ActionRowBuilder,
+    ButtonBuilder,
+    ButtonStyle,
+    type TextChannel,
+} from 'discord.js';
+import { type DiscordBot } from '../../../core/client.js';
 
 export const data = new SlashCommandBuilder()
     .setName('rplacebutton')
@@ -11,17 +18,19 @@ export const execute = async (interaction: ChatInputCommandInteraction, client: 
         return;
     }
 
-    const row = new ActionRowBuilder<ButtonBuilder>()
-        .addComponents(
-            new ButtonBuilder()
-                .setCustomId('give_rplace2023_role')
-                .setLabel('r/Place 2023')
-                .setStyle(ButtonStyle.Primary)
-        );
+    const row = new ActionRowBuilder<ButtonBuilder>().addComponents(
+        new ButtonBuilder()
+            .setCustomId('give_rplace2023_role')
+            .setLabel('r/Place 2023')
+            .setStyle(ButtonStyle.Primary),
+    );
 
     const channel = interaction.channel as TextChannel;
     if (channel) {
-        await channel.send({ content: "Haz clic para obtener el rol de r/Place 2023", components: [row] });
-        await interaction.reply({ content: "Botón enviado.", ephemeral: true });
+        await channel.send({
+            content: 'Haz clic para obtener el rol de r/Place 2023',
+            components: [row],
+        });
+        await interaction.reply({ content: 'Botón enviado.', ephemeral: true });
     }
 };

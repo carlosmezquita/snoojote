@@ -1,5 +1,5 @@
-import { SlashCommandBuilder, ChatInputCommandInteraction, EmbedBuilder } from 'discord.js';
-import { DiscordBot } from '../../../core/client.js';
+import { SlashCommandBuilder, type ChatInputCommandInteraction, EmbedBuilder } from 'discord.js';
+import { type DiscordBot } from '../../../core/client.js';
 import shopService from '../services/shopService.js';
 import { Colors } from '../../../shared/utils/embeds.js';
 
@@ -18,10 +18,12 @@ export const execute = async (interaction: ChatInputCommandInteraction, client: 
     if (inventory.length === 0) {
         embed.setDescription('Tu inventario está vacío. ¡Visita la `/tienda`!');
     } else {
-        const description = inventory.map(item => {
-            const date = new Date(item.acquiredAt).toLocaleDateString();
-            return `• **${item.name}** - ${item.description} (Adquirido: ${date})`;
-        }).join('\n');
+        const description = inventory
+            .map((item) => {
+                const date = new Date(item.acquiredAt).toLocaleDateString();
+                return `• **${item.name}** - ${item.description} (Adquirido: ${date})`;
+            })
+            .join('\n');
 
         embed.setDescription(description);
     }

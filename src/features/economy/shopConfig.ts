@@ -14,7 +14,7 @@ export const shopCatalog: ShopItemConfig[] = [
         price: 10000,
         type: 'CONSUMABLE',
         value: 'STREAK_FREEZE',
-        emoji: '🧊'
+        emoji: '🧊',
     },
     {
         name: 'Hidalgo',
@@ -22,7 +22,7 @@ export const shopCatalog: ShopItemConfig[] = [
         price: 1000,
         type: 'ROLE',
         value: 'REPLACE_WITH_HIDALGO_ROLE_ID',
-        emoji: '🗡️'
+        emoji: '🗡️',
     },
     {
         name: 'Conquistador',
@@ -30,7 +30,7 @@ export const shopCatalog: ShopItemConfig[] = [
         price: 5000,
         type: 'ROLE',
         value: 'REPLACE_WITH_CONQUISTADOR_ROLE_ID',
-        emoji: '🗺️'
+        emoji: '🗺️',
     },
     {
         name: 'Capitán General',
@@ -38,7 +38,7 @@ export const shopCatalog: ShopItemConfig[] = [
         price: 15000,
         type: 'ROLE',
         value: 'REPLACE_WITH_CAPITAN_ROLE_ID',
-        emoji: '⚔️'
+        emoji: '⚔️',
     },
     {
         name: 'Gobernador',
@@ -46,7 +46,7 @@ export const shopCatalog: ShopItemConfig[] = [
         price: 50000,
         type: 'ROLE',
         value: 'REPLACE_WITH_GOBERNADOR_ROLE_ID',
-        emoji: '📜'
+        emoji: '📜',
     },
     {
         name: 'Virrey',
@@ -54,7 +54,7 @@ export const shopCatalog: ShopItemConfig[] = [
         price: 100000,
         type: 'ROLE',
         value: 'REPLACE_WITH_VIRREY_ROLE_ID',
-        emoji: '👑'
+        emoji: '👑',
     },
     {
         name: 'Grande de España',
@@ -62,6 +62,6 @@ export const shopCatalog: ShopItemConfig[] = [
         price: 250000,
         type: 'ROLE',
         value: 'REPLACE_WITH_GRANDE_ROLE_ID',
-        emoji: '🦁'
-    }
+        emoji: '🦁',
+    },
 ];

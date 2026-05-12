@@ -13,23 +13,20 @@ const logger = winston.createLogger({
     level: 'info',
     format: winston.format.combine(
         winston.format.timestamp({ format: 'YYYY-MM-DD HH:mm:ss' }),
-        logFormat
+        logFormat,
     ),
     transports: [
         new winston.transports.Console({
-            format: winston.format.combine(
-                winston.format.colorize(),
-                logFormat
-            )
+            format: winston.format.combine(winston.format.colorize(), logFormat),
         }),
         new winston.transports.File({
             filename: path.join(logsDir, 'error.log'),
-            level: 'error'
+            level: 'error',
         }),
         new winston.transports.File({
-            filename: path.join(logsDir, 'combined.log')
-        })
-    ]
+            filename: path.join(logsDir, 'combined.log'),
+        }),
+    ],
 });
 
 export default logger;

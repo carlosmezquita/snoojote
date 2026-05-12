@@ -1,5 +1,5 @@
-import { SlashCommandBuilder, ChatInputCommandInteraction } from 'discord.js';
-import { DiscordBot } from '../../../core/client.js';
+import { SlashCommandBuilder, type ChatInputCommandInteraction } from 'discord.js';
+import { type DiscordBot } from '../../../core/client.js';
 import streakService from '../services/StreakService.js';
 import { createEmbed, Colors } from '../../../shared/utils/embeds.js';
 
@@ -15,15 +15,13 @@ export const execute = async (interaction: ChatInputCommandInteraction, client: 
         return;
     }
 
-    const description = topStreaks.map((s, i) => {
-        return `${i + 1}. <@${s.userId}> - **${s.highestStreak}** days (Current: ${s.streak})`;
-    }).join('\n');
+    const description = topStreaks
+        .map((s, i) => {
+            return `${i + 1}. <@${s.userId}> - **${s.highestStreak}** days (Current: ${s.streak})`;
+        })
+        .join('\n');
 
-    const embed = createEmbed(
-        '🏆 Top Streaks',
-        description,
-        Colors.Gold
-    ).setTimestamp();
+    const embed = createEmbed('🏆 Top Streaks', description, Colors.Gold).setTimestamp();
 
     await interaction.reply({ embeds: [embed] });
 };

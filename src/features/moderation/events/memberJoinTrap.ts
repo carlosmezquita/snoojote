@@ -1,5 +1,5 @@
-import { Events, GuildMember, Collection } from 'discord.js';
-import { DiscordBot } from '../../../core/client.js';
+import { Events, type GuildMember, Collection } from 'discord.js';
+import { type DiscordBot } from '../../../core/client.js';
 import inviteCache from '../services/InviteCacheService.js';
 import verificationService from '../services/VerificationService.js';
 
@@ -16,15 +16,15 @@ export const execute = async (member: GuildMember, client: DiscordBot) => {
     const newInvites = await guild.invites.fetch();
 
     // Find used invite
-    let usedInvite = newInvites.find(inv => {
+    const usedInvite = newInvites.find((inv) => {
         const oldUses = cachedInvites ? cachedInvites.get(inv.code) || 0 : 0;
         return (inv.uses || 0) > oldUses;
     });
 
     // Update cache
-    inviteCache.set(guild.id, new Collection(newInvites.map(inv => [inv.code, inv.uses || 0])));
+    inviteCache.set(guild.id, new Collection(newInvites.map((inv) => [inv.code, inv.uses || 0])));
 
-    client.logger.info(`   -> Invite used: ${usedInvite ? usedInvite.code : "Unknown"}`);
+    client.logger.info(`   -> Invite used: ${usedInvite ? usedInvite.code : 'Unknown'}`);
 
     const accountAgeMs = Date.now() - member.user.createdTimestamp;
     if (accountAgeMs > THREE_MONTHS_MS) {

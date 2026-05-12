@@ -43,7 +43,7 @@ export const config = {
         starboard: env.CHANNEL_STARBOARD,
         ai: env.CHANNEL_AI,
         wordOfTheDay: env.CHANNEL_WORD_OF_THE_DAY,
-        transcripts: env.CHANNEL_TRANSCRIPTS || env.CHANNEL_LOGS
+        transcripts: env.CHANNEL_TRANSCRIPTS || env.CHANNEL_LOGS,
     },
     roles: {
         dailyPing: env.ROLE_DAILY_PING,
@@ -51,22 +51,26 @@ export const config = {
         mod: env.ROLE_MOD,
         support: env.ROLE_SUPPORT,
         rPlace: env.ROLE_RPLACE,
-        linkWhitelist: env.ROLE_LINK_WHITELIST_IDS.split(',').map(id => id.trim())
+        linkWhitelist: env.ROLE_LINK_WHITELIST_IDS.split(',').map((id) => id.trim()),
     },
     links: {
-        whitelist: ["https://tenor.com/view/", "https://media.discordapp.net/", "https://cdn.discordapp.com/"]
+        whitelist: [
+            'https://tenor.com/view/',
+            'https://media.discordapp.net/',
+            'https://cdn.discordapp.com/',
+        ],
     },
     starboard: {
-        emojis: ["🤡", "⭐"],
-        minReactions: 3
+        emojis: ['🤡', '⭐'],
+        minReactions: 3,
     },
     tickets: {
-        maxOpenPerUser: env.MAX_OPEN_TICKETS_PER_USER
+        maxOpenPerUser: env.MAX_OPEN_TICKETS_PER_USER,
     },
     streaks: {
         channelIds: (env.STREAK_CHANNEL_IDS || `${env.CHANNEL_STREAKS},${env.CHANNEL_MAIN}`)
             .split(',')
-            .map(id => id.trim())
-            .filter(Boolean)
-    }
+            .map((id) => id.trim())
+            .filter(Boolean),
+    },
 };

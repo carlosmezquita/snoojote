@@ -1,5 +1,5 @@
-import { Events, Invite } from 'discord.js';
-import { DiscordBot } from '../../../core/client.js';
+import { Events, type Invite } from 'discord.js';
+import { type DiscordBot } from '../../../core/client.js';
 import inviteCache from '../services/InviteCacheService.js';
 
 export const name = Events.InviteDelete;

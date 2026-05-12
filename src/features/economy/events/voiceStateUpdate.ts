@@ -1,4 +1,4 @@
-import { Events, VoiceState } from 'discord.js';
+import { Events, type VoiceState } from 'discord.js';
 import economyService from '../services/economyService.js';
 import { QuestType } from '../services/questService.js';
 
@@ -10,7 +10,7 @@ export default {
     once: false,
     async execute(oldState: VoiceState, newState: VoiceState) {
         const userId = newState.member?.id || oldState.member?.id;
-        if (!userId || (newState.member?.user.bot)) return;
+        if (!userId || newState.member?.user.bot) return;
 
         const now = Date.now();
 
@@ -37,9 +37,16 @@ export default {
                     }
 
                     // Quest Progress
-                    const quest = await economyService.getDailyQuest(userId, newState.client as any);
+                    const quest = await economyService.getDailyQuest(
+                        userId,
+                        newState.client as any,
+                    );
                     if (quest && !quest.isCompleted && quest.type === QuestType.VOICE_TIME) {
-                        const updatedQuest = await economyService.updateQuestProgress(userId, QuestType.VOICE_TIME, durationMinutes);
+                        await economyService.updateQuestProgress(
+                            userId,
+                            QuestType.VOICE_TIME,
+                            durationMinutes,
+                        );
                         // We can't reply to a voice state update, so maybe we rely on /daily to check status
                         // Or send a DM (intrusive)
                         // Or just let it be silent until they check
@@ -48,5 +55,5 @@ export default {
                 voiceJoins.delete(userId);
             }
         }
-    }
+    },
 };

@@ -1,5 +1,5 @@
-import { SlashCommandBuilder, ChatInputCommandInteraction, EmbedBuilder } from 'discord.js';
-import { DiscordBot } from '../../../core/client.js';
+import { SlashCommandBuilder, type ChatInputCommandInteraction, EmbedBuilder } from 'discord.js';
+import { type DiscordBot } from '../../../core/client.js';
 import economyService from '../services/economyService.js';
 
 export const data = new SlashCommandBuilder()
@@ -10,7 +10,7 @@ export const execute = async (interaction: ChatInputCommandInteraction, client: 
     const leaderboard = await economyService.getLeaderboard(10);
 
     const embed = new EmbedBuilder()
-        .setColor(0xFFD700)
+        .setColor(0xffd700)
         .setTitle('🏆 Richest Users (Pesetas)')
         .setTimestamp();
 

@@ -1,6 +1,6 @@
 import cron from 'node-cron';
-import { DiscordBot } from '../../../core/client.js';
-import { Events, TextChannel } from 'discord.js';
+import { type DiscordBot } from '../../../core/client.js';
+import { Events, type TextChannel } from 'discord.js';
 import { config } from '../../../config.js';
 import triviaService from '../services/TriviaService.js';
 
@@ -13,18 +13,24 @@ export const once = true;
 
 export const execute = (client: DiscordBot) => {
     if (isScheduled) {
-        client.logger.warn('Daily Question cron already scheduled; skipping duplicate registration.');
+        client.logger.warn(
+            'Daily Question cron already scheduled; skipping duplicate registration.',
+        );
         return;
     }
 
     isScheduled = true;
 
-    cron.schedule(DAILY_QUESTION_CRON, async () => {
-        await runDailyQuestion(client, 'scheduled');
-    }, {
-        scheduled: true,
-        timezone: "Europe/Madrid"
-    });
+    cron.schedule(
+        DAILY_QUESTION_CRON,
+        async () => {
+            await runDailyQuestion(client, 'scheduled');
+        },
+        {
+            scheduled: true,
+            timezone: 'Europe/Madrid',
+        },
+    );
 
     client.logger.info('Daily Question cron scheduled for 14:00 Europe/Madrid');
 
@@ -38,7 +44,9 @@ async function runDailyQuestion(client: DiscordBot, mode: 'scheduled' | 'startup
         const channel = await client.channels.fetch(channelID);
 
         if (!channel || !channel.isTextBased()) {
-            client.logger.error(`Daily Question Error: Channel ${channelID} not found or is not text-based.`);
+            client.logger.error(
+                `Daily Question Error: Channel ${channelID} not found or is not text-based.`,
+            );
             return;
         }
 

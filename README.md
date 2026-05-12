@@ -1,6 +1,6 @@
 # new_snoojote
 
-A robust Discord bot built with TypeScript, Node.js, and Discord.js, featuring economy, moderation, and community engagement tools.
+A robust Discord bot built with TypeScript, Bun, and Discord.js, featuring economy, moderation, and community engagement tools.
 
 ## Features
 
@@ -15,7 +15,7 @@ A robust Discord bot built with TypeScript, Node.js, and Discord.js, featuring e
 ## Tech Stack
 
 - **Language**: TypeScript
-- **Runtime**: Node.js
+- **Runtime**: Bun
 - **Framework**: Discord.js (v14)
 - **Database**: SQLite (via Bun SQLite and Drizzle)
 - **ORM**: Drizzle ORM
@@ -30,12 +30,14 @@ A robust Discord bot built with TypeScript, Node.js, and Discord.js, featuring e
 ## Installation
 
 1.  **Clone the repository:**
+
     ```bash
     git clone <repository-url>
     cd new_snoojote
     ```
 
 2.  **Install dependencies:**
+
     ```bash
     bun install
     ```
@@ -94,6 +96,7 @@ bun run dev
 ### Production
 
 1.  **Build the project:**
+
     ```bash
     bun run build
     ```
@@ -110,6 +113,29 @@ To register slash commands with Discord:
 ```bash
 bun run deploy
 ```
+
+## Quality Checks
+
+Run the full local gate before merging or deploying:
+
+```bash
+bun run check
+```
+
+This runs TypeScript type checking, ESLint, Prettier format verification, Drizzle schema checks, and Bun unit tests.
+
+Useful individual commands:
+
+```bash
+bun run lint
+bun run format:check
+bun run typecheck
+bun test
+```
+
+## Migrating From the Old Bot
+
+Use the step-by-step guide in `docs/old-snoojote-migration-guide.md` before replacing the old `open-ticket` based Snoojote in production.
 
 ## Project Structure
 

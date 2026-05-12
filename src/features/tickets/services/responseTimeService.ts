@@ -1,4 +1,4 @@
-import { Guild } from 'discord.js';
+import { type Guild } from 'discord.js';
 import db from '../../../database/db.js';
 import { tickets } from '../../../database/schema.js';
 import { desc, isNotNull, eq, and, isNull, count, gte } from 'drizzle-orm';
@@ -32,7 +32,8 @@ export class ResponseTimeService {
         const ticket = await db.select().from(tickets).where(eq(tickets.id, ticketId)).get();
 
         if (ticket && !ticket.firstResponseAt) {
-            await db.update(tickets)
+            await db
+                .update(tickets)
                 .set({ firstResponseAt: timestamp })
                 .where(eq(tickets.id, ticketId));
         }
@@ -47,7 +48,7 @@ export class ResponseTimeService {
         const cacheKey = guild.id;
         const cached = staffCache.get(cacheKey);
 
-        if (cached && (Date.now() - cached.fetchedAt) < STAFF_CACHE_TTL_MS) {
+        if (cached && Date.now() - cached.fetchedAt < STAFF_CACHE_TTL_MS) {
             return cached.activeCount;
         }
 
@@ -72,7 +73,7 @@ export class ResponseTimeService {
             return 0;
         }
 
-        const activeCount = supportRole.members.filter(member => {
+        const activeCount = supportRole.members.filter((member) => {
             const status = member.presence?.status ?? guild.presences.cache.get(member.id)?.status;
             return status === 'online' || status === 'dnd' || status === 'idle';
         }).size;
@@ -86,12 +87,10 @@ export class ResponseTimeService {
      * received a staff response. This is the unanswered queue (Q).
      */
     async getUnansweredQueueLength(): Promise<number> {
-        const result = await db.select({ value: count() })
+        const result = await db
+            .select({ value: count() })
             .from(tickets)
-            .where(and(
-                eq(tickets.status, 'open'),
-                isNull(tickets.firstResponseAt),
-            ))
+            .where(and(eq(tickets.status, 'open'), isNull(tickets.firstResponseAt)))
             .get();
 
         return result?.value ?? 0;
@@ -102,7 +101,8 @@ export class ResponseTimeService {
      * Used for recording context data at ticket creation.
      */
     async getOpenTicketCount(): Promise<number> {
-        const result = await db.select({ value: count() })
+        const result = await db
+            .select({ value: count() })
             .from(tickets)
             .where(eq(tickets.status, 'open'))
             .get();
@@ -123,10 +123,11 @@ export class ResponseTimeService {
         const now = new Date();
 
         // Step 2.1: M_recent — last 10 answered tickets
-        const recentRows = await db.select({
-            createdAt: tickets.createdAt,
-            firstResponseAt: tickets.firstResponseAt,
-        })
+        const recentRows = await db
+            .select({
+                createdAt: tickets.createdAt,
+                firstResponseAt: tickets.firstResponseAt,
+            })
             .from(tickets)
             .where(isNotNull(tickets.firstResponseAt))
             .orderBy(desc(tickets.createdAt))
@@ -134,8 +135,8 @@ export class ResponseTimeService {
             .all();
 
         const recentTickets: TicketResponseData[] = recentRows
-            .filter(r => r.firstResponseAt != null)
-            .map(r => ({
+            .filter((r) => r.firstResponseAt != null)
+            .map((r) => ({
                 createdAt: r.createdAt,
                 firstResponseAt: r.firstResponseAt!,
             }));
@@ -147,35 +148,34 @@ export class ResponseTimeService {
         const currentBlock = getTimeBlock(currentParts.hour);
 
         // Fetch all answered tickets from the last 60 days for temporal filtering
-        const historicalRows = await db.select({
-            createdAt: tickets.createdAt,
-            firstResponseAt: tickets.firstResponseAt,
-        })
+        const historicalRows = await db
+            .select({
+                createdAt: tickets.createdAt,
+                firstResponseAt: tickets.firstResponseAt,
+            })
             .from(tickets)
-            .where(and(
-                isNotNull(tickets.firstResponseAt),
-                gte(tickets.firstResponseAt, sixtyDaysAgo),
-            ))
+            .where(
+                and(isNotNull(tickets.firstResponseAt), gte(tickets.firstResponseAt, sixtyDaysAgo)),
+            )
             .all();
 
         // Filter in-app for matching day-of-week + time block
         // (SQLite timestamp mode makes SQL-level day/hour extraction impractical)
         const temporalTickets: TicketResponseData[] = historicalRows
-            .filter(r => {
+            .filter((r) => {
                 if (!r.firstResponseAt) return false;
                 const parts = getTimeZoneParts(r.createdAt);
-                return parts.weekday === currentDay
-                    && getTimeBlock(parts.hour) === currentBlock;
+                return parts.weekday === currentDay && getTimeBlock(parts.hour) === currentBlock;
             })
-            .map(r => ({
+            .map((r) => ({
                 createdAt: r.createdAt,
                 firstResponseAt: r.firstResponseAt!,
             }));
 
         // All answered tickets (for global median fallback)
         const allTickets: TicketResponseData[] = historicalRows
-            .filter(r => r.firstResponseAt != null)
-            .map(r => ({
+            .filter((r) => r.firstResponseAt != null)
+            .map((r) => ({
                 createdAt: r.createdAt,
                 firstResponseAt: r.firstResponseAt!,
             }));
@@ -211,9 +211,10 @@ function getTimeZoneParts(date: Date): { weekday: number; hour: number } {
     });
 
     const parts = Object.fromEntries(
-        formatter.formatToParts(date)
-            .filter(part => part.type !== 'literal')
-            .map(part => [part.type, part.value])
+        formatter
+            .formatToParts(date)
+            .filter((part) => part.type !== 'literal')
+            .map((part) => [part.type, part.value]),
     ) as { weekday: string; hour: string };
 
     const weekdays = ['Sun', 'Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat'];

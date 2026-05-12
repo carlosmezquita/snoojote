@@ -1,5 +1,5 @@
-import { Events, GuildChannel, PermissionFlagsBits } from 'discord.js';
-import { DiscordBot } from '../../../core/client.js';
+import { Events, type GuildChannel } from 'discord.js';
+import { type DiscordBot } from '../../../core/client.js';
 
 import { config } from '../../../config.js';
 
@@ -13,8 +13,12 @@ export const execute = async (channel: GuildChannel, client: DiscordBot) => {
     try {
         if (!channel.permissionOverwrites.cache.has(SUSPECT_ROLE_ID)) {
             await channel.permissionOverwrites.edit(SUSPECT_ROLE_ID, {
-                ViewChannel: false, SendMessages: false, Connect: false
+                ViewChannel: false,
+                SendMessages: false,
+                Connect: false,
             });
         }
-    } catch (err) { client.logger.error(`Lock Error: ${err}`); }
+    } catch (err) {
+        client.logger.error(`Lock Error: ${err}`);
+    }
 };

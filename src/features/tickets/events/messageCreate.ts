@@ -1,5 +1,5 @@
-import { Events, Message, ChannelType } from 'discord.js';
-import { DiscordBot } from '../../../core/client.js';
+import { Events, type Message } from 'discord.js';
+import { type DiscordBot } from '../../../core/client.js';
 import db from '../../../database/db.js';
 import { tickets } from '../../../database/schema.js';
 import { eq, and } from 'drizzle-orm';
@@ -26,12 +26,10 @@ export default {
         if (!member.roles.cache.has(supportRoleId)) return;
 
         try {
-            const ticket = await db.select()
+            const ticket = await db
+                .select()
                 .from(tickets)
-                .where(and(
-                    eq(tickets.channelId, message.channel.id),
-                    eq(tickets.status, 'open')
-                ))
+                .where(and(eq(tickets.channelId, message.channel.id), eq(tickets.status, 'open')))
                 .get();
 
             if (ticket) {
@@ -41,5 +39,5 @@ export default {
         } catch (error) {
             client.logger.error(`Error in messageCreate ticket handler: ${error}`);
         }
-    }
+    },
 };

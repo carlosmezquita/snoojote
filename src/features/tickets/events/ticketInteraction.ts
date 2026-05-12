@@ -3,15 +3,15 @@ import {
     ComponentType,
     Events,
     GuildMember,
-    Interaction,
-    ModalActionRowComponentBuilder,
+    type Interaction,
+    type ModalActionRowComponentBuilder,
     ModalBuilder,
     PermissionFlagsBits,
-    TextChannel,
+    type TextChannel,
     TextInputBuilder,
     TextInputStyle,
 } from 'discord.js';
-import { DiscordBot } from '../../../core/client.js';
+import { type DiscordBot } from '../../../core/client.js';
 import { config } from '../../../config.js';
 import ticketService from '../services/ticketService.js';
 import { ticketOptions } from '../config/options/index.js';
@@ -29,13 +29,19 @@ export const execute = async (interaction: Interaction, client: DiscordBot) => {
 
             const ticket = await ticketService.getTicketByChannel(interaction.channel.id);
             if (!ticket) {
-                await interaction.reply({ content: 'Este canal no es un ticket activo.', ephemeral: true });
+                await interaction.reply({
+                    content: 'Este canal no es un ticket activo.',
+                    ephemeral: true,
+                });
                 return;
             }
 
             const member = await getGuildMember(interaction);
             if (!member || (!canManageTickets(member) && ticket.userId !== interaction.user.id)) {
-                await interaction.reply({ content: 'No tienes permiso para cerrar este ticket.', ephemeral: true });
+                await interaction.reply({
+                    content: 'No tienes permiso para cerrar este ticket.',
+                    ephemeral: true,
+                });
                 return;
             }
 
@@ -48,17 +54,26 @@ export const execute = async (interaction: Interaction, client: DiscordBot) => {
 
             const member = await getGuildMember(interaction);
             if (!member || !canManageTickets(member)) {
-                await interaction.reply({ content: 'No tienes permiso para gestionar este ticket.', ephemeral: true });
+                await interaction.reply({
+                    content: 'No tienes permiso para gestionar este ticket.',
+                    ephemeral: true,
+                });
                 return;
             }
 
             await interaction.deferReply({ ephemeral: true });
             try {
                 if (customId === 'reopen_ticket') {
-                    await ticketService.reopenTicket(interaction.channel as TextChannel, interaction.user);
+                    await ticketService.reopenTicket(
+                        interaction.channel as TextChannel,
+                        interaction.user,
+                    );
                     await interaction.editReply('Ticket reabierto.');
                 } else {
-                    await ticketService.deleteTicket(interaction.channel as TextChannel, interaction.user);
+                    await ticketService.deleteTicket(
+                        interaction.channel as TextChannel,
+                        interaction.user,
+                    );
                     await interaction.editReply('Ticket marcado para eliminación.');
                 }
             } catch (error) {
@@ -73,7 +88,6 @@ export const execute = async (interaction: Interaction, client: DiscordBot) => {
             await interaction.showModal(option.modal);
             return;
         }
-
     } else if (interaction.isModalSubmit()) {
         if (!interaction.guild) return;
 
@@ -83,8 +97,13 @@ export const execute = async (interaction: Interaction, client: DiscordBot) => {
             await interaction.deferReply({ ephemeral: true });
 
             try {
-                const reason = interaction.fields.getTextInputValue('close_reason') || 'No reason provided.';
-                await ticketService.closeTicket(interaction.channel as TextChannel, interaction.user, reason);
+                const reason =
+                    interaction.fields.getTextInputValue('close_reason') || 'No reason provided.';
+                await ticketService.closeTicket(
+                    interaction.channel as TextChannel,
+                    interaction.user,
+                    reason,
+                );
                 await interaction.editReply('Ticket cerrado.');
             } catch (error) {
                 client.logger.error(`Ticket Close Error: ${error}`);
@@ -100,7 +119,7 @@ export const execute = async (interaction: Interaction, client: DiscordBot) => {
             if (option) {
                 await interaction.deferReply({ ephemeral: true });
 
-                const modalData: { question: string, answer: string }[] = [];
+                const modalData: { question: string; answer: string }[] = [];
 
                 interaction.fields.fields.forEach((field) => {
                     if (field.type === ComponentType.TextInput) {
@@ -109,10 +128,15 @@ export const execute = async (interaction: Interaction, client: DiscordBot) => {
                         const components = option.modal?.components;
                         if (components) {
                             for (const row of components) {
-                                const actionRow = row as ActionRowBuilder<ModalActionRowComponentBuilder>;
+                                const actionRow =
+                                    row as ActionRowBuilder<ModalActionRowComponentBuilder>;
                                 const input = actionRow.components[0];
 
-                                if (input && 'data' in input && input.data.custom_id === field.customId) {
+                                if (
+                                    input &&
+                                    'data' in input &&
+                                    input.data.custom_id === field.customId
+                                ) {
                                     label = input.data.label || field.customId;
                                 }
                             }
@@ -120,21 +144,28 @@ export const execute = async (interaction: Interaction, client: DiscordBot) => {
 
                         modalData.push({
                             question: label,
-                            answer: field.value
+                            answer: field.value,
                         });
                     }
                 });
 
                 try {
-                    const channel = await ticketService.createTicket(interaction.user, interaction.guild!, option, modalData);
+                    const channel = await ticketService.createTicket(
+                        interaction.user,
+                        interaction.guild!,
+                        option,
+                        modalData,
+                    );
                     if (channel) {
                         await interaction.editReply(`Ticket creado: ${channel.toString()}`);
                     } else {
-                        await interaction.editReply(`Has alcanzado el límite de ${config.tickets.maxOpenPerUser} tickets abiertos.`);
+                        await interaction.editReply(
+                            `Has alcanzado el límite de ${config.tickets.maxOpenPerUser} tickets abiertos.`,
+                        );
                     }
                 } catch (error) {
                     client.logger.error(`Ticket Create Error: ${error}`);
-                    await interaction.editReply("Hubo un error al crear el ticket.");
+                    await interaction.editReply('Hubo un error al crear el ticket.');
                 }
             }
         }
@@ -164,7 +195,9 @@ async function getGuildMember(interaction: Interaction): Promise<GuildMember | n
 }
 
 function canManageTickets(member: GuildMember): boolean {
-    return member.permissions.has(PermissionFlagsBits.Administrator)
-        || member.roles.cache.has(config.roles.mod)
-        || member.roles.cache.has(config.roles.support);
+    return (
+        member.permissions.has(PermissionFlagsBits.Administrator) ||
+        member.roles.cache.has(config.roles.mod) ||
+        member.roles.cache.has(config.roles.support)
+    );
 }

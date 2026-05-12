@@ -1,5 +1,5 @@
-import { SlashCommandBuilder, ChatInputCommandInteraction, EmbedBuilder } from 'discord.js';
-import { DiscordBot } from '../../../core/client.js';
+import { SlashCommandBuilder, type ChatInputCommandInteraction, EmbedBuilder } from 'discord.js';
+import { type DiscordBot } from '../../../core/client.js';
 import shopService from '../services/shopService.js';
 import { Colors } from '../../../shared/utils/embeds.js';
 
@@ -22,12 +22,12 @@ export const execute = async (interaction: ChatInputCommandInteraction, client: 
     if (items.length === 0) {
         embed.setDescription('La tienda está vacía.');
     } else {
-        const fields = items.map(item => {
-            const typeEmoji = item.emoji ? item.emoji : (item.type === 'ROLE' ? '👑' : '📦');
+        const fields = items.map((item) => {
+            const typeEmoji = item.emoji ? item.emoji : item.type === 'ROLE' ? '👑' : '📦';
             return {
                 name: `${typeEmoji} ${item.name}`,
                 value: `**${item.price} ₧**\n${item.description}`,
-                inline: true
+                inline: true,
             };
         });
         embed.addFields(fields);

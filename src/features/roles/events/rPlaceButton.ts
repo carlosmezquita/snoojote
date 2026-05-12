@@ -1,5 +1,5 @@
-import { Events, Interaction } from 'discord.js';
-import { DiscordBot } from '../../../core/client.js';
+import { Events, type Interaction } from 'discord.js';
+import { type DiscordBot } from '../../../core/client.js';
 
 import { config } from '../../../config.js';
 
@@ -10,7 +10,7 @@ export const once = false;
 
 export const execute = async (interaction: Interaction, client: DiscordBot) => {
     if (!interaction.isButton()) return;
-    if (interaction.customId !== "give_rplace2023_role") return;
+    if (interaction.customId !== 'give_rplace2023_role') return;
 
     if (!interaction.inGuild() || !interaction.member) return;
 
@@ -20,13 +20,13 @@ export const execute = async (interaction: Interaction, client: DiscordBot) => {
     try {
         if (member.roles.cache.has(ROLE_ID)) {
             await member.roles.remove(ROLE_ID);
-            await interaction.reply({ content: "Rol eliminado correctamente.", ephemeral: true });
+            await interaction.reply({ content: 'Rol eliminado correctamente.', ephemeral: true });
         } else {
             await member.roles.add(ROLE_ID);
-            await interaction.reply({ content: "Rol añadido correctamente.", ephemeral: true });
+            await interaction.reply({ content: 'Rol añadido correctamente.', ephemeral: true });
         }
     } catch (error) {
         client.logger.error(`rPlace Role Error: ${error}`);
-        await interaction.reply({ content: "Error al gestionar el rol.", ephemeral: true });
+        await interaction.reply({ content: 'Error al gestionar el rol.', ephemeral: true });
     }
 };

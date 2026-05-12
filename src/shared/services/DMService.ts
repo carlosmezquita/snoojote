@@ -1,4 +1,11 @@
-import { User, APIEmbedField, EmbedBuilder, ColorResolvable, AttachmentBuilder, Attachment } from 'discord.js';
+import {
+    type User,
+    type APIEmbedField,
+    EmbedBuilder,
+    type ColorResolvable,
+    type AttachmentBuilder,
+    type Attachment,
+} from 'discord.js';
 import { Colors } from '../utils/embeds.js';
 
 export enum DMType {
@@ -7,7 +14,7 @@ export enum DMType {
     Warning = 'warning',
     Sanction = 'sanction',
     Gift = 'gift',
-    Neutral = 'neutral'
+    Neutral = 'neutral',
 }
 
 export interface DMOptions {
@@ -41,7 +48,8 @@ export class DMService {
         } else {
             embed.setFooter({
                 text: `r/Spain Discord`,
-                iconURL: 'https://media.discordapp.net/attachments/298140651676237824/1051478405897527316/rspainupscaled.png'
+                iconURL:
+                    'https://media.discordapp.net/attachments/298140651676237824/1051478405897527316/rspainupscaled.png',
             });
         }
 
@@ -80,27 +88,57 @@ export class DMService {
 
     // --- Helper Methods using the Options pattern ---
 
-    public static async sendInfo(user: User, title: string, description: string, fields?: APIEmbedField[]) {
+    public static async sendInfo(
+        user: User,
+        title: string,
+        description: string,
+        fields?: APIEmbedField[],
+    ) {
         return this.send({ user, type: DMType.Info, title, description, fields });
     }
 
-    public static async sendSuccess(user: User, title: string, description: string, fields?: APIEmbedField[]) {
+    public static async sendSuccess(
+        user: User,
+        title: string,
+        description: string,
+        fields?: APIEmbedField[],
+    ) {
         return this.send({ user, type: DMType.Success, title, description, fields });
     }
 
-    public static async sendWarning(user: User, title: string, description: string, fields?: APIEmbedField[]) {
+    public static async sendWarning(
+        user: User,
+        title: string,
+        description: string,
+        fields?: APIEmbedField[],
+    ) {
         return this.send({ user, type: DMType.Warning, title, description, fields });
     }
 
-    public static async sendSanction(user: User, title: string, description: string, fields?: APIEmbedField[]) {
+    public static async sendSanction(
+        user: User,
+        title: string,
+        description: string,
+        fields?: APIEmbedField[],
+    ) {
         return this.send({ user, type: DMType.Sanction, title, description, fields });
     }
 
-    public static async sendGift(user: User, title: string, description: string, fields?: APIEmbedField[]) {
+    public static async sendGift(
+        user: User,
+        title: string,
+        description: string,
+        fields?: APIEmbedField[],
+    ) {
         return this.send({ user, type: DMType.Gift, title, description, fields });
     }
 
-    public static async sendNeutral(user: User, title: string, description: string, fields?: APIEmbedField[]) {
+    public static async sendNeutral(
+        user: User,
+        title: string,
+        description: string,
+        fields?: APIEmbedField[],
+    ) {
         return this.send({ user, type: DMType.Neutral, title, description, fields });
     }
 }

@@ -1,5 +1,5 @@
-import { Events, Message } from 'discord.js';
-import { DiscordBot } from '../../../core/client.js';
+import { Events, type Message } from 'discord.js';
+import { type DiscordBot } from '../../../core/client.js';
 import { config } from '../../../config.js';
 import streakService from '../services/StreakService.js';
 

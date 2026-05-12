@@ -1,0 +1,7 @@
+build/
+coverage/
+data/
+dist/
+logs/
+node_modules/
+tasks.md

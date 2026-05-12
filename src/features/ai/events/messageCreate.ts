@@ -1,8 +1,8 @@
-import { Events, Message, MessageType } from 'discord.js';
-import { DiscordBot } from '../../../core/client.js';
+import { Events, type Message } from 'discord.js';
+import { type DiscordBot } from '../../../core/client.js';
 import { config } from '../../../config.js';
 import { Agent } from '../services/Agent.js';
-import { HumanMessage, AIMessage, BaseMessage } from "@langchain/core/messages";
+import { HumanMessage, AIMessage, type BaseMessage } from '@langchain/core/messages';
 import logger from '../../../utils/logger.js';
 
 const agent = new Agent();
@@ -29,16 +29,24 @@ export default {
                 // Build history by traversing the reply chain
                 // Limit history to last 10 messages to avoid context limit issues
                 let depth = 0;
-                while (currentMessage.reference && currentMessage.reference.messageId && depth < 10) {
+                while (
+                    currentMessage.reference &&
+                    currentMessage.reference.messageId &&
+                    depth < 10
+                ) {
                     try {
-                        const referencedMessage = await message.channel.messages.fetch(currentMessage.reference.messageId);
+                        const referencedMessage = await message.channel.messages.fetch(
+                            currentMessage.reference.messageId,
+                        );
                         if (!referencedMessage) break;
 
                         if (referencedMessage.author.id === client.user!.id) {
                             history.unshift(new AIMessage(referencedMessage.content));
                         } else {
                             // Replace bot mention in history too, to make it cleaner for the AI
-                            const text = referencedMessage.content.replace(new RegExp(`<@!?${client.user!.id}>`, 'g'), 'Snoojote').trim();
+                            const text = referencedMessage.content
+                                .replace(new RegExp(`<@!?${client.user!.id}>`, 'g'), 'Snoojote')
+                                .trim();
                             history.unshift(new HumanMessage(text));
                         }
                         currentMessage = referencedMessage;
@@ -49,7 +57,9 @@ export default {
                     }
                 }
 
-                const text = message.content.replace(new RegExp(`<@!?${client.user!.id}>`, 'g'), 'Snoojote').trim();
+                const text = message.content
+                    .replace(new RegExp(`<@!?${client.user!.id}>`, 'g'), 'Snoojote')
+                    .trim();
 
                 const response = await agent.getResponse(text, history);
                 let content = response.content as string;
@@ -59,11 +69,12 @@ export default {
                 }
 
                 await message.reply(content);
-
             } catch (error) {
                 logger.error('Error generating AI response:', error);
-                await message.reply("Ha ocurrido un fallo técnico. Por favor, inténtalo de nuevo más tarde.");
+                await message.reply(
+                    'Ha ocurrido un fallo técnico. Por favor, inténtalo de nuevo más tarde.',
+                );
             }
         }
-    }
+    },
 };

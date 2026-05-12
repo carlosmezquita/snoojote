@@ -1,20 +1,27 @@
-import { SlashCommandBuilder, ChatInputCommandInteraction, PermissionFlagsBits, GuildMember } from 'discord.js';
-import { DiscordBot } from '../../../core/client.js';
+import {
+    SlashCommandBuilder,
+    type ChatInputCommandInteraction,
+    PermissionFlagsBits,
+    type GuildMember,
+} from 'discord.js';
+import { type DiscordBot } from '../../../core/client.js';
 import verificationService from '../services/VerificationService.js';
 import { createEmbed, Colors } from '../../../shared/utils/embeds.js';
 
 export const data = new SlashCommandBuilder()
     .setName('challenge')
     .setDescription('Manually trigger verification for a user.')
-    .addUserOption(option =>
-        option.setName('user')
-            .setDescription('The user to challenge')
-            .setRequired(true))
+    .addUserOption((option) =>
+        option.setName('user').setDescription('The user to challenge').setRequired(true),
+    )
     .setDefaultMemberPermissions(PermissionFlagsBits.ModerateMembers);
 
 export const execute = async (interaction: ChatInputCommandInteraction, client: DiscordBot) => {
     if (!interaction.inGuild()) {
-        await interaction.reply({ content: 'This command can only be used in a server.', ephemeral: true });
+        await interaction.reply({
+            content: 'This command can only be used in a server.',
+            ephemeral: true,
+        });
         return;
     }
 
@@ -47,7 +54,7 @@ export const execute = async (interaction: ChatInputCommandInteraction, client: 
         const embed = createEmbed(
             'Challenge Initiated',
             `Verification process started for ${member.toString()}.`,
-            Colors.Success
+            Colors.Success,
         );
         await interaction.editReply({ embeds: [embed] });
     } catch (error) {

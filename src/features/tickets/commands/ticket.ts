@@ -1,59 +1,64 @@
-import { ChatInputCommandInteraction, GuildMember, PermissionFlagsBits, SlashCommandBuilder, TextChannel } from 'discord.js';
-import { DiscordBot } from '../../../core/client.js';
+import {
+    type ChatInputCommandInteraction,
+    GuildMember,
+    PermissionFlagsBits,
+    SlashCommandBuilder,
+    type TextChannel,
+} from 'discord.js';
+import { type DiscordBot } from '../../../core/client.js';
 import { config } from '../../../config.js';
 import ticketService from '../services/ticketService.js';
 
 export const data = new SlashCommandBuilder()
     .setName('ticket')
     .setDescription('Gestiona el ticket actual.')
-    .addSubcommand(subcommand =>
-        subcommand
-            .setName('claim')
-            .setDescription('Reclama el ticket actual.'))
-    .addSubcommand(subcommand =>
-        subcommand
-            .setName('unclaim')
-            .setDescription('Libera el ticket actual.'))
-    .addSubcommand(subcommand =>
+    .addSubcommand((subcommand) =>
+        subcommand.setName('claim').setDescription('Reclama el ticket actual.'),
+    )
+    .addSubcommand((subcommand) =>
+        subcommand.setName('unclaim').setDescription('Libera el ticket actual.'),
+    )
+    .addSubcommand((subcommand) =>
         subcommand
             .setName('close')
             .setDescription('Cierra el ticket actual.')
-            .addStringOption(option =>
+            .addStringOption((option) =>
                 option
                     .setName('reason')
                     .setDescription('Motivo de cierre')
                     .setMaxLength(1024)
-                    .setRequired(false)))
-    .addSubcommand(subcommand =>
-        subcommand
-            .setName('reopen')
-            .setDescription('Reabre el ticket actual.'))
-    .addSubcommand(subcommand =>
-        subcommand
-            .setName('delete')
-            .setDescription('Elimina el canal del ticket actual.'))
-    .addSubcommand(subcommand =>
+                    .setRequired(false),
+            ),
+    )
+    .addSubcommand((subcommand) =>
+        subcommand.setName('reopen').setDescription('Reabre el ticket actual.'),
+    )
+    .addSubcommand((subcommand) =>
+        subcommand.setName('delete').setDescription('Elimina el canal del ticket actual.'),
+    )
+    .addSubcommand((subcommand) =>
         subcommand
             .setName('add')
             .setDescription('Añade un usuario al ticket actual.')
-            .addUserOption(option =>
-                option
-                    .setName('user')
-                    .setDescription('Usuario a añadir')
-                    .setRequired(true)))
-    .addSubcommand(subcommand =>
+            .addUserOption((option) =>
+                option.setName('user').setDescription('Usuario a añadir').setRequired(true),
+            ),
+    )
+    .addSubcommand((subcommand) =>
         subcommand
             .setName('remove')
             .setDescription('Retira un usuario del ticket actual.')
-            .addUserOption(option =>
-                option
-                    .setName('user')
-                    .setDescription('Usuario a retirar')
-                    .setRequired(true)));
+            .addUserOption((option) =>
+                option.setName('user').setDescription('Usuario a retirar').setRequired(true),
+            ),
+    );
 
 export const execute = async (interaction: ChatInputCommandInteraction, client: DiscordBot) => {
     if (!interaction.inGuild() || !interaction.channel || !interaction.channel.isTextBased()) {
-        await interaction.reply({ content: 'Este comando solo puede usarse dentro de un ticket.', ephemeral: true });
+        await interaction.reply({
+            content: 'Este comando solo puede usarse dentro de un ticket.',
+            ephemeral: true,
+        });
         return;
     }
 
@@ -75,12 +80,18 @@ export const execute = async (interaction: ChatInputCommandInteraction, client: 
     const isOwner = ticket.userId === interaction.user.id;
 
     if (subcommand === 'close' && !isManager && !isOwner) {
-        await interaction.reply({ content: 'No tienes permiso para cerrar este ticket.', ephemeral: true });
+        await interaction.reply({
+            content: 'No tienes permiso para cerrar este ticket.',
+            ephemeral: true,
+        });
         return;
     }
 
     if (subcommand !== 'close' && !isManager) {
-        await interaction.reply({ content: 'No tienes permiso para gestionar este ticket.', ephemeral: true });
+        await interaction.reply({
+            content: 'No tienes permiso para gestionar este ticket.',
+            ephemeral: true,
+        });
         return;
     }
 
@@ -136,13 +147,17 @@ export const execute = async (interaction: ChatInputCommandInteraction, client: 
     }
 };
 
-async function getGuildMember(interaction: ChatInputCommandInteraction): Promise<GuildMember | null> {
+async function getGuildMember(
+    interaction: ChatInputCommandInteraction,
+): Promise<GuildMember | null> {
     if (interaction.member instanceof GuildMember) return interaction.member;
-    return await interaction.guild?.members.fetch(interaction.user.id).catch(() => null) ?? null;
+    return (await interaction.guild?.members.fetch(interaction.user.id).catch(() => null)) ?? null;
 }
 
 function canManageTickets(member: GuildMember): boolean {
-    return member.permissions.has(PermissionFlagsBits.Administrator)
-        || member.roles.cache.has(config.roles.mod)
-        || member.roles.cache.has(config.roles.support);
+    return (
+        member.permissions.has(PermissionFlagsBits.Administrator) ||
+        member.roles.cache.has(config.roles.mod) ||
+        member.roles.cache.has(config.roles.support)
+    );
 }

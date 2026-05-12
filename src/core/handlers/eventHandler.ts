@@ -1,7 +1,7 @@
 import { fileURLToPath, pathToFileURL } from 'url';
 import { glob } from 'glob';
 import path from 'path';
-import { DiscordBot } from '../client.js';
+import { type DiscordBot } from '../client.js';
 
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);

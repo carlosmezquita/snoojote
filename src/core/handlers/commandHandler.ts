@@ -1,6 +1,6 @@
 import { glob } from 'glob';
-import { DiscordBot } from '../client.js';
-import { ChatInputCommandInteraction, MessageFlags } from 'discord.js';
+import { type DiscordBot } from '../client.js';
+import { type ChatInputCommandInteraction, MessageFlags } from 'discord.js';
 import path from 'path';
 import { fileURLToPath, pathToFileURL } from 'url';
 
@@ -40,9 +40,15 @@ export default async (client: DiscordBot) => {
             client.logger.error(error);
             try {
                 if (interaction.replied || interaction.deferred) {
-                    await interaction.followUp({ content: 'There was an error while executing this command!', flags: MessageFlags.Ephemeral });
+                    await interaction.followUp({
+                        content: 'There was an error while executing this command!',
+                        flags: MessageFlags.Ephemeral,
+                    });
                 } else {
-                    await interaction.reply({ content: 'There was an error while executing this command!', flags: MessageFlags.Ephemeral });
+                    await interaction.reply({
+                        content: 'There was an error while executing this command!',
+                        flags: MessageFlags.Ephemeral,
+                    });
                 }
             } catch (err) {
                 client.logger.error(`Failed to send error message to user: ${err}`);

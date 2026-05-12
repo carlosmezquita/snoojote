@@ -2,7 +2,7 @@ import db from '../../../database/db.js';
 import { shopItems, userInventory } from '../../../database/schema.js';
 import { eq, and, asc } from 'drizzle-orm';
 import economyService from './economyService.js';
-import { ChatInputCommandInteraction } from 'discord.js';
+import { type ChatInputCommandInteraction } from 'discord.js';
 import { shopCatalog } from '../shopConfig.js';
 
 export class ShopService {
@@ -20,7 +20,8 @@ export class ShopService {
     }
 
     async getInventory(userId: string) {
-        const inventory = await db.select()
+        const inventory = await db
+            .select()
             .from(userInventory)
             .where(eq(userInventory.userId, userId));
 
@@ -34,11 +35,14 @@ export class ShopService {
         return enrichedInventory;
     }
 
-    async buyItem(interaction: ChatInputCommandInteraction, itemName: string): Promise<{ success: boolean, message: string }> {
+    async buyItem(
+        interaction: ChatInputCommandInteraction,
+        itemName: string,
+    ): Promise<{ success: boolean; message: string }> {
         const item = await db.select().from(shopItems).where(eq(shopItems.name, itemName)).get();
 
         if (!item) {
-            return { success: false, message: "El artículo no existe." };
+            return { success: false, message: 'El artículo no existe.' };
         }
 
         const userId = interaction.user.id;
@@ -47,16 +51,21 @@ export class ShopService {
         // Check Balance
         const balance = await economyService.getBalance(userId);
         if (balance < item.price) {
-            return { success: false, message: `No tienes suficientes Pesetas. Necesitas **${item.price} ₧**.` };
+            return {
+                success: false,
+                message: `No tienes suficientes Pesetas. Necesitas **${item.price} ₧**.`,
+            };
         }
 
         // Check if already owns
-        const existing = await db.select().from(userInventory)
+        const existing = await db
+            .select()
+            .from(userInventory)
             .where(and(eq(userInventory.userId, userId), eq(userInventory.itemId, item.id)))
             .get();
 
         if (existing && !isConsumable) {
-            return { success: false, message: "Ya tienes este artículo." };
+            return { success: false, message: 'Ya tienes este artículo.' };
         }
 
         // Process Role Assignment
@@ -65,13 +74,19 @@ export class ShopService {
             const member = interaction.member as any;
 
             if (!member || !interaction.guild) {
-                return { success: false, message: "Error al asignar el rol. ¿Estás en el servidor?" };
+                return {
+                    success: false,
+                    message: 'Error al asignar el rol. ¿Estás en el servidor?',
+                };
             }
 
             try {
                 // Check if Role ID is the placeholder
                 if (roleId.startsWith('REPLACE')) {
-                    return { success: false, message: "⚠️ Error: El ID del rol no está configurado en `shopConfig.ts`." };
+                    return {
+                        success: false,
+                        message: '⚠️ Error: El ID del rol no está configurado en `shopConfig.ts`.',
+                    };
                 }
 
                 const role = interaction.guild.roles.cache.get(roleId);
@@ -79,21 +94,30 @@ export class ShopService {
                 if (role) {
                     await member.roles.add(role);
                 } else {
-                    return { success: false, message: "Error de configuración: El rol no existe en Discord." };
+                    return {
+                        success: false,
+                        message: 'Error de configuración: El rol no existe en Discord.',
+                    };
                 }
             } catch (error) {
-                return { success: false, message: "No pude asignar el rol. Verifica mis permisos (Gestión de Roles)." };
+                return {
+                    success: false,
+                    message: 'No pude asignar el rol. Verifica mis permisos (Gestión de Roles).',
+                };
             }
         }
 
         const paid = await economyService.spendBalance(userId, item.price);
         if (!paid) {
-            return { success: false, message: `No tienes suficientes Pesetas. Necesitas **${item.price} ₧**.` };
+            return {
+                success: false,
+                message: `No tienes suficientes Pesetas. Necesitas **${item.price} ₧**.`,
+            };
         }
 
         await db.insert(userInventory).values({
             userId,
-            itemId: item.id
+            itemId: item.id,
         });
 
         return { success: true, message: `¡Has comprado **${item.name}** por ${item.price} ₧!` };
@@ -101,7 +125,7 @@ export class ShopService {
 
     async seedItems() {
         // Sync DB with Config
-        const configNames = shopCatalog.map(i => i.name);
+        const configNames = shopCatalog.map((i) => i.name);
 
         // 1. Delete items not in config
         const dbItems = await db.select().from(shopItems);
@@ -115,18 +139,27 @@ export class ShopService {
         // 2. Upsert items from config
         for (const configItem of shopCatalog) {
             // Check if exists by name
-            const existing = await db.select().from(shopItems).where(eq(shopItems.name, configItem.name)).get();
+            const existing = await db
+                .select()
+                .from(shopItems)
+                .where(eq(shopItems.name, configItem.name))
+                .get();
 
             if (existing) {
                 // Update properties if changed (price, description, value, emoji)
-                if (existing.price !== configItem.price || existing.value !== configItem.value || existing.emoji !== configItem.emoji) {
-                    await db.update(shopItems)
+                if (
+                    existing.price !== configItem.price ||
+                    existing.value !== configItem.value ||
+                    existing.emoji !== configItem.emoji
+                ) {
+                    await db
+                        .update(shopItems)
                         .set({
                             description: configItem.description,
                             price: configItem.price,
                             type: configItem.type,
                             value: configItem.value,
-                            emoji: configItem.emoji
+                            emoji: configItem.emoji,
                         })
                         .where(eq(shopItems.id, existing.id));
                 }

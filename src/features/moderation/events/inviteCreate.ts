@@ -1,5 +1,5 @@
-import { Events, Collection, Invite } from 'discord.js';
-import { DiscordBot } from '../../../core/client.js';
+import { Events, Collection, type Invite } from 'discord.js';
+import { type DiscordBot } from '../../../core/client.js';
 import inviteCache from '../services/InviteCacheService.js';
 
 export const name = Events.InviteCreate;

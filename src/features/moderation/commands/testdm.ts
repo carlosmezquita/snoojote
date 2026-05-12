@@ -1,11 +1,12 @@
-import { SlashCommandBuilder, ChatInputCommandInteraction } from 'discord.js';
+import { SlashCommandBuilder, type ChatInputCommandInteraction } from 'discord.js';
 import { DMService, DMType } from '../../../shared/services/DMService.js';
 
 export const data = new SlashCommandBuilder()
     .setName('testdm')
     .setDescription('Test the DM Service')
-    .addStringOption(option =>
-        option.setName('type')
+    .addStringOption((option) =>
+        option
+            .setName('type')
             .setDescription('The type of DM to send')
             .setRequired(true)
             .addChoices(
@@ -14,8 +15,8 @@ export const data = new SlashCommandBuilder()
                 { name: 'Warning', value: DMType.Warning },
                 { name: 'Sanction', value: DMType.Sanction },
                 { name: 'Gift', value: DMType.Gift },
-                { name: 'Neutral', value: DMType.Neutral }
-            )
+                { name: 'Neutral', value: DMType.Neutral },
+            ),
     );
 
 export async function execute(interaction: ChatInputCommandInteraction) {
@@ -28,7 +29,7 @@ export async function execute(interaction: ChatInputCommandInteraction) {
         type: type,
         title: `Test DM: ${type}`,
         description: `This is a test message for the **${type}** notification type.`,
-        footer: 'Snoojote Test System'
+        footer: 'Snoojote Test System',
     });
 
     if (sent) {

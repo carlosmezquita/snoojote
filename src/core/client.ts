@@ -20,9 +20,9 @@ export class DiscordBot extends Client {
                 GatewayIntentBits.GuildMembers,
                 GatewayIntentBits.GuildPresences,
                 GatewayIntentBits.DirectMessages,
-                GatewayIntentBits.GuildMessageReactions
+                GatewayIntentBits.GuildMessageReactions,
             ],
-            partials: [Partials.Channel, Partials.Message, Partials.Reaction, Partials.User]
+            partials: [Partials.Channel, Partials.Message, Partials.Reaction, Partials.User],
         });
 
         this.commands = new Collection();
@@ -36,7 +36,9 @@ export class DiscordBot extends Client {
 
     async loadHandlers() {
         const handlerPath = path.join(__dirname, 'handlers');
-        const handlers = fs.readdirSync(handlerPath).filter(file => file.endsWith('.ts') || file.endsWith('.js'));
+        const handlers = fs
+            .readdirSync(handlerPath)
+            .filter((file) => file.endsWith('.ts') || file.endsWith('.js'));
 
         for (const file of handlers) {
             const filePath = path.join(handlerPath, file);

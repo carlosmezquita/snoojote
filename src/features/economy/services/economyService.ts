@@ -1,13 +1,14 @@
 import db from '../../../database/db.js';
 import { streaks, users } from '../../../database/schema.js';
 import { eq, sql, desc, and } from 'drizzle-orm';
-import questService, { QuestData } from './questService.js';
-import { DiscordBot } from '../../../core/client.js';
+import questService, { type QuestData } from './questService.js';
+import { type DiscordBot } from '../../../core/client.js';
 import { getDailyReward } from '../../streaks/services/streakRules.js';
 
 export class EconomyService {
     async getBalance(userId: string): Promise<number> {
-        const user = await db.select({ points: users.points })
+        const user = await db
+            .select({ points: users.points })
             .from(users)
             .where(eq(users.userId, userId))
             .get();
@@ -15,11 +16,12 @@ export class EconomyService {
     }
 
     async addBalance(userId: string, amount: number): Promise<void> {
-        await db.insert(users)
+        await db
+            .insert(users)
             .values({ userId, points: amount })
             .onConflictDoUpdate({
                 target: users.userId,
-                set: { points: sql`${users.points} + ${amount}` }
+                set: { points: sql`${users.points} + ${amount}` },
             });
     }
 
@@ -28,12 +30,10 @@ export class EconomyService {
 
         try {
             return db.transaction((tx) => {
-                const spendResult = tx.update(users)
+                const spendResult = tx
+                    .update(users)
                     .set({ points: sql`${users.points} - ${amount}` })
-                    .where(and(
-                        eq(users.userId, userId),
-                        sql`${users.points} >= ${amount}`
-                    ))
+                    .where(and(eq(users.userId, userId), sql`${users.points} >= ${amount}`))
                     .returning({ userId: users.userId })
                     .get();
 
@@ -48,7 +48,7 @@ export class EconomyService {
             if (e instanceof Error && e.message.includes('Rollback')) {
                 return false;
             }
-            console.error("Spend transaction failed:", e);
+            console.error('Spend transaction failed:', e);
             return false;
         }
     }
@@ -59,12 +59,10 @@ export class EconomyService {
         try {
             return db.transaction((tx) => {
                 // Conditional update for the sender to ensure atomicity
-                const debitResult = tx.update(users)
+                const debitResult = tx
+                    .update(users)
                     .set({ points: sql`${users.points} - ${amount}` })
-                    .where(and(
-                        eq(users.userId, senderId),
-                        sql`${users.points} >= ${amount}`
-                    ))
+                    .where(and(eq(users.userId, senderId), sql`${users.points} >= ${amount}`))
                     .returning({ userId: users.userId })
                     .get();
 
@@ -79,7 +77,7 @@ export class EconomyService {
                     .values({ userId: receiverId, points: amount })
                     .onConflictDoUpdate({
                         target: users.userId,
-                        set: { points: sql`${users.points} + ${amount}` }
+                        set: { points: sql`${users.points} + ${amount}` },
                     })
                     .run();
 
@@ -93,13 +91,14 @@ export class EconomyService {
             if (e instanceof Error && e.message.includes('Rollback')) {
                 return false;
             }
-            console.error("Transfer transaction failed:", e);
+            console.error('Transfer transaction failed:', e);
             return false;
         }
     }
 
-    async getLeaderboard(limit: number = 10): Promise<{ user_id: string, points: number }[]> {
-        const leaderboard = await db.select({ user_id: users.userId, points: users.points })
+    async getLeaderboard(limit: number = 10): Promise<{ user_id: string; points: number }[]> {
+        const leaderboard = await db
+            .select({ user_id: users.userId, points: users.points })
             .from(users)
             .orderBy(desc(users.points))
             .limit(limit);
@@ -108,7 +107,8 @@ export class EconomyService {
     }
 
     async getCurrentDailyReward(userId: string): Promise<number> {
-        const userStreak = await db.select({ streak: streaks.streak })
+        const userStreak = await db
+            .select({ streak: streaks.streak })
             .from(streaks)
             .where(eq(streaks.userId, userId))
             .get();
@@ -117,7 +117,7 @@ export class EconomyService {
     }
 
     async getDailyQuest(userId: string, client: DiscordBot): Promise<QuestData> {
-        let user = await db.select().from(users).where(eq(users.userId, userId)).get();
+        const user = await db.select().from(users).where(eq(users.userId, userId)).get();
 
         if (!user) {
             return questService.generateQuest(client);
@@ -126,22 +126,26 @@ export class EconomyService {
         const now = new Date();
         const lastActivity = user.lastActivityDate;
 
-        const isNewDay = !lastActivity || lastActivity.getDate() !== now.getDate() || lastActivity.getMonth() !== now.getMonth();
+        const isNewDay =
+            !lastActivity ||
+            lastActivity.getDate() !== now.getDate() ||
+            lastActivity.getMonth() !== now.getMonth();
 
         if (isNewDay || !user.dailyQuest) {
             const newQuest = await questService.generateQuest(client);
-            await db.insert(users)
+            await db
+                .insert(users)
                 .values({
                     userId,
                     dailyQuest: newQuest,
-                    lastActivityDate: now
+                    lastActivityDate: now,
                 })
                 .onConflictDoUpdate({
                     target: users.userId,
                     set: {
                         dailyQuest: newQuest,
                         lastActivityDate: now,
-                    }
+                    },
                 });
             return newQuest;
         }
@@ -149,13 +153,18 @@ export class EconomyService {
         return user.dailyQuest as QuestData;
     }
 
-    async updateQuestProgress(userId: string, type: string, increment: number, channelId?: string): Promise<QuestData | null> {
+    async updateQuestProgress(
+        userId: string,
+        type: string,
+        increment: number,
+        channelId?: string,
+    ): Promise<QuestData | null> {
         const user = await db.select().from(users).where(eq(users.userId, userId)).get();
         if (!user || !user.dailyQuest) return null;
 
         // Clone/create a new object to ensure Drizzle sees it as a new value if that's the issue?
         // Or simply spread it.
-        const quest: QuestData = { ...user.dailyQuest as QuestData };
+        const quest: QuestData = { ...(user.dailyQuest as QuestData) };
 
         if (quest.type !== type) return null;
         if (quest.isCompleted) return quest;
@@ -167,18 +176,18 @@ export class EconomyService {
         // Check completion - this function modifies 'quest' object in place (sets isCompleted = true)
         questService.checkCompletion(quest);
 
-        await db.update(users)
-            .set({ dailyQuest: quest })
-            .where(eq(users.userId, userId));
+        await db.update(users).set({ dailyQuest: quest }).where(eq(users.userId, userId));
 
         return quest;
     }
 
-    async claimDaily(userId: string): Promise<{ success: boolean, message: string, reward?: number }> {
+    async claimDaily(
+        userId: string,
+    ): Promise<{ success: boolean; message: string; reward?: number }> {
         try {
             return db.transaction((tx) => {
                 const user = tx.select().from(users).where(eq(users.userId, userId)).get();
-                if (!user) return { success: false, message: "User not found." };
+                if (!user) return { success: false, message: 'User not found.' };
 
                 const now = new Date();
                 const lastDaily = user.lastDaily;
@@ -190,17 +199,21 @@ export class EconomyService {
                         const remaining = 24 - hours;
                         const h = Math.floor(remaining);
                         const m = Math.floor((remaining - h) * 60);
-                        return { success: false, message: `Already claimed. Try again in ${h}h ${m}m.` };
+                        return {
+                            success: false,
+                            message: `Already claimed. Try again in ${h}h ${m}m.`,
+                        };
                     }
                 }
 
                 const quest = user.dailyQuest as QuestData;
 
                 if (!quest || !quest.isCompleted) {
-                    return { success: false, message: "Daily Quest not completed yet!" };
+                    return { success: false, message: 'Daily Quest not completed yet!' };
                 }
 
-                const userStreak = tx.select({ streak: streaks.streak })
+                const userStreak = tx
+                    .select({ streak: streaks.streak })
                     .from(streaks)
                     .where(eq(streaks.userId, userId))
                     .get();
@@ -208,34 +221,40 @@ export class EconomyService {
                 const reward = getDailyReward(userStreak?.streak ?? 0);
 
                 // Atomic condition check for claimDaily: ensure lastDaily hasn't changed since we read it
-                const updateResult = tx.update(users)
+                const updateResult = tx
+                    .update(users)
                     .set({
                         points: sql`${users.points} + ${reward}`,
-                        lastDaily: now
+                        lastDaily: now,
                     })
-                    .where(and(
-                        eq(users.userId, userId),
-                        // Depending on lastDaily being null or having a specific timestamp
-                        lastDaily === null
-                            ? sql`last_daily IS NULL`
-                            : eq(users.lastDaily, lastDaily)
-                    ))
+                    .where(
+                        and(
+                            eq(users.userId, userId),
+                            // Depending on lastDaily being null or having a specific timestamp
+                            lastDaily === null
+                                ? sql`last_daily IS NULL`
+                                : eq(users.lastDaily, lastDaily),
+                        ),
+                    )
                     .returning({ userId: users.userId })
                     .get();
 
                 if (!updateResult) {
                     tx.rollback();
-                    return { success: false, message: "Failed to claim, possible concurrent request." };
+                    return {
+                        success: false,
+                        message: 'Failed to claim, possible concurrent request.',
+                    };
                 }
 
-                return { success: true, message: "Daily reward claimed!", reward };
+                return { success: true, message: 'Daily reward claimed!', reward };
             });
         } catch (e) {
-             if (e instanceof Error && e.message.includes('Rollback')) {
-                 return { success: false, message: "Failed to claim, possible concurrent request." };
-             }
-             console.error("Claim Daily transaction failed:", e);
-             return { success: false, message: "An error occurred." };
+            if (e instanceof Error && e.message.includes('Rollback')) {
+                return { success: false, message: 'Failed to claim, possible concurrent request.' };
+            }
+            console.error('Claim Daily transaction failed:', e);
+            return { success: false, message: 'An error occurred.' };
         }
     }
 }

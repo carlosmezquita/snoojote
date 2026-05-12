@@ -1,9 +1,9 @@
-import { ChannelType, TextChannel } from 'discord.js';
-import { DiscordBot } from '../../../core/client.js';
+import { ChannelType, type TextChannel } from 'discord.js';
+import { type DiscordBot } from '../../../core/client.js';
 
 export enum QuestType {
     MESSAGE_COUNT = 'MESSAGE_COUNT',
-    VOICE_TIME = 'VOICE_TIME'
+    VOICE_TIME = 'VOICE_TIME',
 }
 
 export interface QuestData {
@@ -34,11 +34,12 @@ export class QuestService {
         // For simplicity, we can fetch cached channels or just pick a random text channel the bot can see.
         // In a real app, you might want to filter by specific categories.
 
-        const channels = client.channels.cache.filter(c =>
-            c.type === ChannelType.GuildText &&
-            !c.name.includes('log') &&
-            !c.name.includes('verify') &&
-            !c.name.includes('ticket')
+        const channels = client.channels.cache.filter(
+            (c) =>
+                c.type === ChannelType.GuildText &&
+                !c.name.includes('log') &&
+                !c.name.includes('verify') &&
+                !c.name.includes('ticket'),
         );
 
         const channelList = Array.from(channels.values());
@@ -49,11 +50,13 @@ export class QuestService {
                 current: 0,
                 goal: 5,
                 description: 'Send 5 messages in any channel.',
-                isCompleted: false
+                isCompleted: false,
             };
         }
 
-        const targetChannel = channelList[Math.floor(Math.random() * channelList.length)] as TextChannel;
+        const targetChannel = channelList[
+            Math.floor(Math.random() * channelList.length)
+        ] as TextChannel;
         const goal = Math.floor(Math.random() * 3) + 3; // 3 to 5 messages
 
         return {
@@ -63,7 +66,7 @@ export class QuestService {
             current: 0,
             goal: goal,
             description: `Send ${goal} messages in <#${targetChannel.id}>`,
-            isCompleted: false
+            isCompleted: false,
         };
     }
 
@@ -74,7 +77,7 @@ export class QuestService {
             current: 0,
             goal: goal, // stored in minutes for simplicity in display, but we might track internally differently
             description: `Spend ${goal} minutes in any voice channel`,
-            isCompleted: false
+            isCompleted: false,
         };
     }
 

@@ -38,7 +38,7 @@ export class RAEService {
             const response = await fetch(`${this.baseUrl}/daily`);
             if (!response.ok) return null;
 
-            const json = await response.json() as RAEResponse<WordOnlyData>;
+            const json = (await response.json()) as RAEResponse<WordOnlyData>;
             return json.ok && json.data ? json.data.word : null;
         } catch (error) {
             console.error('Error fetching word of the day:', error);
@@ -52,16 +52,16 @@ export class RAEService {
 
             // Handle 404 specially as it might contain suggestions
             if (response.status === 404) {
-                const json = await response.json() as RAEResponse<null>;
+                const json = (await response.json()) as RAEResponse<null>;
                 return { data: null, suggestions: json.suggestions || [] };
             }
 
             if (!response.ok) return { data: null, suggestions: [] };
 
-            const json = await response.json() as RAEResponse<WordEntryData>;
+            const json = (await response.json()) as RAEResponse<WordEntryData>;
             return {
                 data: json.ok && json.data ? json.data : null,
-                suggestions: []
+                suggestions: [],
             };
         } catch (error) {
             console.error(`Error fetching definition for ${word}:`, error);

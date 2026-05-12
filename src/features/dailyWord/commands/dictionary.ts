@@ -1,5 +1,5 @@
-import { SlashCommandBuilder, ChatInputCommandInteraction } from 'discord.js';
-import { DiscordBot } from '../../../core/client.js';
+import { SlashCommandBuilder, type ChatInputCommandInteraction } from 'discord.js';
+import { type DiscordBot } from '../../../core/client.js';
 import raeService from '../services/raeService.js';
 import { createEmbed, Colors } from '../../../shared/utils/embeds.js';
 import { createRaeEmbed } from '../utils/embedHelper.js';
@@ -7,10 +7,8 @@ import { createRaeEmbed } from '../utils/embedHelper.js';
 export const data = new SlashCommandBuilder()
     .setName('diccionario')
     .setDescription('Busca una palabra en el diccionario de la lengua española.')
-    .addStringOption(option =>
-        option.setName('palabra')
-            .setDescription('La palabra a buscar')
-            .setRequired(true)
+    .addStringOption((option) =>
+        option.setName('palabra').setDescription('La palabra a buscar').setRequired(true),
     );
 
 export const execute = async (interaction: ChatInputCommandInteraction, client: DiscordBot) => {
@@ -25,14 +23,10 @@ export const execute = async (interaction: ChatInputCommandInteraction, client: 
             let description = `No se encontró la palabra "**${word}**" en el diccionario de la lengua española.`;
 
             if (result.suggestions && result.suggestions.length > 0) {
-                description += `\n\n**Quizás quisiste decir:**\n${result.suggestions.map(s => `• ${s}`).join('\n')}`;
+                description += `\n\n**Quizás quisiste decir:**\n${result.suggestions.map((s) => `• ${s}`).join('\n')}`;
             }
 
-            const embed = createEmbed(
-                'Palabra no encontrada',
-                description,
-                Colors.Error
-            );
+            const embed = createEmbed('Palabra no encontrada', description, Colors.Error);
             await interaction.editReply({ embeds: [embed] });
             return;
         }
@@ -50,8 +44,13 @@ export const execute = async (interaction: ChatInputCommandInteraction, client: 
             if (interaction.deferred || interaction.replied) {
                 await interaction.editReply({ content: 'Ocurrió un error al buscar la palabra.' });
             } else {
-                await interaction.reply({ content: 'Ocurrió un error al buscar la palabra.', ephemeral: true });
+                await interaction.reply({
+                    content: 'Ocurrió un error al buscar la palabra.',
+                    ephemeral: true,
+                });
             }
-        } catch (ignored) { }
+        } catch {
+            // Best-effort user notification after the original command failure.
+        }
     }
 };

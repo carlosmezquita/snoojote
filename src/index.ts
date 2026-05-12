@@ -16,7 +16,7 @@ process.on('uncaughtException', (error) => {
     logger.error('Uncaught Exception:', error);
 });
 
-(async () => {
+void (async () => {
     try {
         logger.info('Starting bot...');
         if (!process.env.TOKEN) {

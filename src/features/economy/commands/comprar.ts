@@ -1,23 +1,33 @@
-import { SlashCommandBuilder, ChatInputCommandInteraction, EmbedBuilder, ActionRowBuilder, ButtonBuilder, ButtonStyle, ComponentType } from 'discord.js';
-import { DiscordBot } from '../../../core/client.js';
+import {
+    SlashCommandBuilder,
+    type ChatInputCommandInteraction,
+    EmbedBuilder,
+    ActionRowBuilder,
+    ButtonBuilder,
+    ButtonStyle,
+    ComponentType,
+} from 'discord.js';
+import { type DiscordBot } from '../../../core/client.js';
 import shopService from '../services/shopService.js';
 import { createEmbed, Colors } from '../../../shared/utils/embeds.js';
 import { shopCatalog } from '../shopConfig.js';
 
 // Create choices from catalog
-const itemChoices = shopCatalog.map(item => ({
+const itemChoices = shopCatalog.map((item) => ({
     name: `${item.emoji} ${item.name} (${item.price} ₧)`,
-    value: item.name
+    value: item.name,
 }));
 
 export const data = new SlashCommandBuilder()
     .setName('comprar')
     .setDescription('Comprar un artículo de la tienda o ver el catálogo.')
-    .addStringOption(option =>
-        option.setName('rango')
+    .addStringOption((option) =>
+        option
+            .setName('rango')
             .setDescription('Selecciona el Rango que deseas comprar')
             .setRequired(false)
-            .addChoices(...itemChoices));
+            .addChoices(...itemChoices),
+    );
 
 export const execute = async (interaction: ChatInputCommandInteraction, client: DiscordBot) => {
     const itemName = interaction.options.getString('rango');
@@ -35,12 +45,12 @@ export const execute = async (interaction: ChatInputCommandInteraction, client: 
         if (items.length === 0) {
             embed.setDescription('La tienda está vacía.');
         } else {
-            const fields = items.map(item => {
-                const typeEmoji = item.emoji ? item.emoji : (item.type === 'ROLE' ? '👑' : '📦');
+            const fields = items.map((item) => {
+                const typeEmoji = item.emoji ? item.emoji : item.type === 'ROLE' ? '👑' : '📦';
                 return {
                     name: `${typeEmoji} ${item.name}`,
                     value: `**${item.price} ₧**\n${item.description}`,
-                    inline: true
+                    inline: true,
                 };
             });
             embed.addFields(fields);
@@ -53,39 +63,43 @@ export const execute = async (interaction: ChatInputCommandInteraction, client: 
     // Process Buy Confirmation
     const item = await shopService.getItemByName(itemName);
     if (!item) {
-        await interaction.reply({ content: 'El artículo seleccionado no existe.', ephemeral: true });
+        await interaction.reply({
+            content: 'El artículo seleccionado no existe.',
+            ephemeral: true,
+        });
         return;
     }
 
     const confirmEmbed = new EmbedBuilder()
         .setTitle('Confirmar Compra')
-        .setDescription(`¿Estás seguro de que quieres comprar **${item.name}** por **${item.price} ₧**?`)
+        .setDescription(
+            `¿Estás seguro de que quieres comprar **${item.name}** por **${item.price} ₧**?`,
+        )
         .setColor(Colors.Warning);
 
-    const row = new ActionRowBuilder<ButtonBuilder>()
-        .addComponents(
-            new ButtonBuilder()
-                .setCustomId('confirm_buy')
-                .setLabel('Confirmar')
-                .setStyle(ButtonStyle.Success),
-            new ButtonBuilder()
-                .setCustomId('cancel_buy')
-                .setLabel('Cancelar')
-                .setStyle(ButtonStyle.Danger)
-        );
+    const row = new ActionRowBuilder<ButtonBuilder>().addComponents(
+        new ButtonBuilder()
+            .setCustomId('confirm_buy')
+            .setLabel('Confirmar')
+            .setStyle(ButtonStyle.Success),
+        new ButtonBuilder()
+            .setCustomId('cancel_buy')
+            .setLabel('Cancelar')
+            .setStyle(ButtonStyle.Danger),
+    );
 
     const response = await interaction.reply({
         embeds: [confirmEmbed],
         components: [row],
-        ephemeral: true
+        ephemeral: true,
     });
 
     const collector = response.createMessageComponentCollector({
         componentType: ComponentType.Button,
-        time: 60000
+        time: 60000,
     });
 
-    collector.on('collect', async i => {
+    collector.on('collect', async (i) => {
         if (i.customId === 'confirm_buy') {
             await i.deferUpdate();
 
@@ -94,29 +108,29 @@ export const execute = async (interaction: ChatInputCommandInteraction, client: 
             const resultEmbed = createEmbed(
                 result.success ? '¡Compra Exitosa!' : 'Error en la Compra',
                 result.message,
-                result.success ? Colors.Success : Colors.Error
+                result.success ? Colors.Success : Colors.Error,
             );
 
             await interaction.editReply({
                 embeds: [resultEmbed],
-                components: []
+                components: [],
             });
         } else if (i.customId === 'cancel_buy') {
             await i.update({
                 content: 'Compra cancelada.',
                 embeds: [],
-                components: []
+                components: [],
             });
         }
     });
 
-    collector.on('end', async collected => {
+    collector.on('end', async (collected) => {
         if (collected.size === 0) {
             try {
                 await interaction.editReply({
                     content: 'Tiempo de espera agotado. Compra cancelada.',
                     embeds: [],
-                    components: []
+                    components: [],
                 });
             } catch (e) {
                 // Ignore

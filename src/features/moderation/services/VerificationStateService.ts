@@ -1,4 +1,4 @@
-import { VerificationState } from '../types/verification.js';
+import { type VerificationState } from '../types/verification.js';
 
 class VerificationStateService {
     private state: Map<string, VerificationState> = new Map();

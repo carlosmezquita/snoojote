@@ -1,4 +1,4 @@
-import { Events, Message, ChannelType } from 'discord.js';
+import { Events, type Message } from 'discord.js';
 import economyService from '../services/economyService.js';
 import { QuestType } from '../services/questService.js';
 
@@ -40,12 +40,19 @@ export default {
 
             if (quest && !quest.isCompleted && quest.type === QuestType.MESSAGE_COUNT) {
                 // Check if channel matches (if strictly enforced) logic in updateQuestProgress handles targetId check
-                const updatedQuest = await economyService.updateQuestProgress(userId, QuestType.MESSAGE_COUNT, 1, channelId);
+                const updatedQuest = await economyService.updateQuestProgress(
+                    userId,
+                    QuestType.MESSAGE_COUNT,
+                    1,
+                    channelId,
+                );
 
                 if (updatedQuest && updatedQuest.isCompleted) {
-                    await message.reply({ content: `🎉 **Quest Completed!** ${updatedQuest.description}\nUse \`/daily\` to claim your reward!` });
+                    await message.reply({
+                        content: `🎉 **Quest Completed!** ${updatedQuest.description}\nUse \`/daily\` to claim your reward!`,
+                    });
                 }
             }
         }
-    }
+    },
 };

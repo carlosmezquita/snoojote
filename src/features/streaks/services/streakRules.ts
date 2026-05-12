@@ -19,9 +19,10 @@ export function getSpainDateKey(date: Date): string {
     });
 
     const parts = Object.fromEntries(
-        formatter.formatToParts(date)
-            .filter(part => part.type !== 'literal')
-            .map(part => [part.type, part.value])
+        formatter
+            .formatToParts(date)
+            .filter((part) => part.type !== 'literal')
+            .map((part) => [part.type, part.value]),
     ) as { year: string; month: string; day: string };
 
     return `${parts.year}-${parts.month}-${parts.day}`;
@@ -40,6 +41,6 @@ export function getNewMilestones(streakDays: number, claimedMilestones: number[]
     const claimed = new Set(claimedMilestones);
     return Object.keys(MILESTONE_BONUSES)
         .map(Number)
-        .filter(milestone => streakDays >= milestone && !claimed.has(milestone))
+        .filter((milestone) => streakDays >= milestone && !claimed.has(milestone))
         .sort((a, b) => a - b);
 }

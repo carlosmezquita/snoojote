@@ -20,7 +20,7 @@ if (!clientId) {
 
 const commands = [];
 
-(async () => {
+void (async () => {
     try {
         const sourcePath = path.join(process.cwd(), 'src/features');
         const pattern = `${sourcePath.replace(/\\/g, '/')}/**/commands/*.{ts,js}`;
@@ -34,7 +34,9 @@ const commands = [];
             if (cmd.data && cmd.execute) {
                 commands.push(cmd.data.toJSON());
             } else {
-                console.warn(`[WARNING] The command at ${file} is missing a required "data" or "execute" property.`);
+                console.warn(
+                    `[WARNING] The command at ${file} is missing a required "data" or "execute" property.`,
+                );
             }
         }
 
@@ -45,16 +47,10 @@ const commands = [];
         // If GUILD_ID is present, deploy to guild (faster for dev), otherwise global
         if (guildId) {
             console.log(`Deploying to guild: ${guildId}`);
-            await rest.put(
-                Routes.applicationGuildCommands(clientId, guildId),
-                { body: commands },
-            );
+            await rest.put(Routes.applicationGuildCommands(clientId, guildId), { body: commands });
         } else {
             console.log('Deploying globally');
-            await rest.put(
-                Routes.applicationCommands(clientId),
-                { body: commands },
-            );
+            await rest.put(Routes.applicationCommands(clientId), { body: commands });
         }
 
         console.log(`Successfully reloaded ${commands.length} application (/) commands.`);

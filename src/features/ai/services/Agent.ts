@@ -1,6 +1,6 @@
-import { ChatGroq } from "@langchain/groq";
-import { ChatPromptTemplate, MessagesPlaceholder } from "@langchain/core/prompts";
-import { SystemMessage, HumanMessage, AIMessage, BaseMessage } from "@langchain/core/messages";
+import { ChatGroq } from '@langchain/groq';
+import { ChatPromptTemplate, MessagesPlaceholder } from '@langchain/core/prompts';
+import { SystemMessage, type BaseMessage } from '@langchain/core/messages';
 
 export class Agent {
     private chatGroq: ChatGroq;
@@ -15,9 +15,11 @@ export class Agent {
         });
 
         const prompt = ChatPromptTemplate.fromMessages([
-            new SystemMessage(`You are a helpful AI assistant named Snoojote. You are chatting in a Discord server.`), // Customizable system prompt
-            new MessagesPlaceholder("history"),
-            ["human", "{input}"],
+            new SystemMessage(
+                `You are a helpful AI assistant named Snoojote. You are chatting in a Discord server.`,
+            ), // Customizable system prompt
+            new MessagesPlaceholder('history'),
+            ['human', '{input}'],
         ]);
 
         this.chain = prompt.pipe(this.chatGroq);
@@ -26,7 +28,7 @@ export class Agent {
     async getResponse(input: string, history: BaseMessage[] = []) {
         return await this.chain.invoke({
             input,
-            history
+            history,
         });
     }
 }

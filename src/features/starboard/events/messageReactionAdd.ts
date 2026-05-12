@@ -1,6 +1,5 @@
-import { Events, MessageReaction, User } from 'discord.js';
+import { Events, type MessageReaction, type User } from 'discord.js';
 import { StarboardService } from '../services/StarboardService.js';
-
 
 export const name = Events.MessageReactionAdd;
 

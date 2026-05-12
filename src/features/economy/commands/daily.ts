@@ -1,5 +1,5 @@
-import { SlashCommandBuilder, ChatInputCommandInteraction } from 'discord.js';
-import { DiscordBot } from '../../../core/client.js';
+import { SlashCommandBuilder, type ChatInputCommandInteraction } from 'discord.js';
+import { type DiscordBot } from '../../../core/client.js';
 import economyService from '../services/economyService.js';
 import { createEmbed, Colors } from '../../../shared/utils/embeds.js';
 
@@ -30,7 +30,7 @@ export const execute = async (interaction: ChatInputCommandInteraction, client: 
         const embed = createEmbed(
             'Daily Reward Claimed!',
             `🎉 You have completed your daily quest:\n**${quest.description}**\n\nReward: **${claimResult.reward}** ₧`,
-            Colors.Success
+            Colors.Success,
         );
         await interaction.reply({ embeds: [embed], ephemeral: true });
         return;
@@ -43,7 +43,7 @@ export const execute = async (interaction: ChatInputCommandInteraction, client: 
         const embed = createEmbed(
             'Daily Reward',
             `You have already claimed your reward for tody.\n${claimResult.message}`,
-            Colors.Warning
+            Colors.Warning,
         );
         await interaction.reply({ embeds: [embed], ephemeral: true });
         return;
@@ -57,7 +57,7 @@ export const execute = async (interaction: ChatInputCommandInteraction, client: 
     const embed = createEmbed(
         'Daily Quest',
         `**Quest**: ${quest.description}\n\n**Progress**: ${quest.current}/${quest.goal}\n${progressBar} ${percentage}%\n\nComplete this quest to claim your **${currentReward} ₧** daily reward!`,
-        Colors.Info
+        Colors.Info,
     );
 
     await interaction.reply({ embeds: [embed], ephemeral: true });

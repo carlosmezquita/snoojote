@@ -1,4 +1,4 @@
-import { ButtonStyle, ColorResolvable, EmbedBuilder, ModalBuilder } from "discord.js";
+import { type ButtonStyle, type ColorResolvable, type ModalBuilder } from 'discord.js';
 
 export interface TicketOptionConfig {
     id: string;

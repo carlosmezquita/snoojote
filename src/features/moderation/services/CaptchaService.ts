@@ -36,11 +36,11 @@ export class CaptchaService {
         ctx.textAlign = 'center';
         ctx.textBaseline = 'middle';
 
-        let startX = width / 2 - (text.length * 20);
+        const startX = width / 2 - text.length * 20;
         for (let i = 0; i < text.length; i++) {
             ctx.save();
             const rotation = (Math.random() - 0.5) * 0.4;
-            ctx.translate(startX + (i * 40), height / 2);
+            ctx.translate(startX + i * 40, height / 2);
             ctx.rotate(rotation);
             ctx.fillText(text[i], 0, 0);
             ctx.restore();

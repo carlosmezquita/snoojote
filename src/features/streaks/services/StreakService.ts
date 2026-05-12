@@ -1,9 +1,9 @@
-import { Message, TextChannel } from 'discord.js';
+import { type Message, type TextChannel } from 'discord.js';
 import { asc, desc, eq } from 'drizzle-orm';
 import db from '../../../database/db.js';
 import { shopItems, streaks, userInventory } from '../../../database/schema.js';
 import { config } from '../../../config.js';
-import { DiscordBot } from '../../../core/client.js';
+import { type DiscordBot } from '../../../core/client.js';
 import economyService from '../../economy/services/economyService.js';
 import {
     getNewMilestones,
@@ -31,19 +31,25 @@ export class StreakService {
             } else {
                 await this.createNewStreak(message, todayKey, now, client);
             }
-
         } catch (error) {
             client.logger.error(`Error handling streak for ${userId}: ${error}`);
         }
     }
 
-    private async updateExistingStreak(message: Message, userStreak: StreakRecord, todayKey: string, now: Date, client: DiscordBot) {
+    private async updateExistingStreak(
+        message: Message,
+        userStreak: StreakRecord,
+        todayKey: string,
+        now: Date,
+        client: DiscordBot,
+    ) {
         if (userStreak.lastStreakDate === todayKey) {
             return;
         }
 
         const claimedMilestones = this.parseClaimedMilestones(userStreak.claimedMilestones);
-        const lastStreakAt = userStreak.lastStreakAt ?? this.dateFromLegacyValue(userStreak.lastStreakDate);
+        const lastStreakAt =
+            userStreak.lastStreakAt ?? this.dateFromLegacyValue(userStreak.lastStreakDate);
         const maintainedByGrace = isWithinGracePeriod(lastStreakAt, now);
         let usedFreeze = false;
         let newStreak = 1;
@@ -60,13 +66,14 @@ export class StreakService {
         const newMilestones = getNewMilestones(newStreak, claimedMilestones);
         const updatedClaimedMilestones = [...claimedMilestones, ...newMilestones];
 
-        await db.update(streaks)
+        await db
+            .update(streaks)
             .set({
                 streak: newStreak,
                 highestStreak,
                 lastStreakDate: todayKey,
                 lastStreakAt: now,
-                claimedMilestones: updatedClaimedMilestones
+                claimedMilestones: updatedClaimedMilestones,
             })
             .where(eq(streaks.userId, message.author.id));
 
@@ -75,10 +82,18 @@ export class StreakService {
         }
 
         await message.react(newStreak > 1 ? '🔥' : '✅');
-        await this.sendBotMessage(client, this.buildStreakMessage(message, newStreak, usedFreeze, newMilestones));
+        await this.sendBotMessage(
+            client,
+            this.buildStreakMessage(message, newStreak, usedFreeze, newMilestones),
+        );
     }
 
-    private async createNewStreak(message: Message, todayKey: string, now: Date, client: DiscordBot) {
+    private async createNewStreak(
+        message: Message,
+        todayKey: string,
+        now: Date,
+        client: DiscordBot,
+    ) {
         const newMilestones = getNewMilestones(1, []);
 
         await db.insert(streaks).values({
@@ -87,20 +102,23 @@ export class StreakService {
             highestStreak: 1,
             lastStreakDate: todayKey,
             lastStreakAt: now,
-            claimedMilestones: newMilestones
+            claimedMilestones: newMilestones,
         });
 
         await message.react('✅');
         await this.sendBotMessage(
             client,
-            `¡Hola ${message.author.toString()}!\n\nHas empezado tu primera racha. Ahora cualquier mensaje significativo en canales generales cuenta como check-in diario.`
+            `¡Hola ${message.author.toString()}!\n\nHas empezado tu primera racha. Ahora cualquier mensaje significativo en canales generales cuenta como check-in diario.`,
         );
     }
 
-    private buildStreakMessage(message: Message, streak: number, usedFreeze: boolean, newMilestones: number[]) {
-        const lines = [
-            `La racha actual de ${message.author.toString()} es de ${streak} días.`
-        ];
+    private buildStreakMessage(
+        message: Message,
+        streak: number,
+        usedFreeze: boolean,
+        newMilestones: number[],
+    ) {
+        const lines = [`La racha actual de ${message.author.toString()} es de ${streak} días.`];
 
         if (usedFreeze) {
             lines.push('🧊 Se consumió un Seguro de Racha para protegerla.');
@@ -114,24 +132,25 @@ export class StreakService {
     }
 
     private async consumeStreakFreeze(userId: string): Promise<boolean> {
-        const freezeItem = await db.select()
+        const freezeItem = await db
+            .select()
             .from(shopItems)
             .where(eq(shopItems.value, STREAK_FREEZE_VALUE))
             .get();
 
         if (!freezeItem) return false;
 
-        const inventorySlots = await db.select()
+        const inventorySlots = await db
+            .select()
             .from(userInventory)
             .where(eq(userInventory.userId, userId))
             .orderBy(asc(userInventory.acquiredAt))
             .all();
-        const inventorySlot = inventorySlots.find(slot => slot.itemId === freezeItem.id);
+        const inventorySlot = inventorySlots.find((slot) => slot.itemId === freezeItem.id);
 
         if (!inventorySlot) return false;
 
-        await db.delete(userInventory)
-            .where(eq(userInventory.id, inventorySlot.id));
+        await db.delete(userInventory).where(eq(userInventory.id, inventorySlot.id));
 
         return true;
     }
@@ -144,14 +163,12 @@ export class StreakService {
     }
 
     async getUserStreak(userId: string) {
-        return await db.select()
-            .from(streaks)
-            .where(eq(streaks.userId, userId))
-            .get();
+        return await db.select().from(streaks).where(eq(streaks.userId, userId)).get();
     }
 
     async getTopStreaks(limit: number = 10) {
-        return await db.select()
+        return await db
+            .select()
             .from(streaks)
             .orderBy(desc(streaks.highestStreak))
             .limit(limit)
@@ -159,19 +176,21 @@ export class StreakService {
     }
 
     async getStreakFreezeCount(userId: string): Promise<number> {
-        const freezeItem = await db.select()
+        const freezeItem = await db
+            .select()
             .from(shopItems)
             .where(eq(shopItems.value, STREAK_FREEZE_VALUE))
             .get();
 
         if (!freezeItem) return 0;
 
-        const inventorySlots = await db.select()
+        const inventorySlots = await db
+            .select()
             .from(userInventory)
             .where(eq(userInventory.userId, userId))
             .all();
 
-        return inventorySlots.filter(slot => slot.itemId === freezeItem.id).length;
+        return inventorySlots.filter((slot) => slot.itemId === freezeItem.id).length;
     }
 
     private parseClaimedMilestones(value: unknown): number[] {

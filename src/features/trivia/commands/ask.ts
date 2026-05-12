@@ -1,5 +1,9 @@
-import { SlashCommandBuilder, ChatInputCommandInteraction, TextChannel } from 'discord.js';
-import { DiscordBot } from '../../../core/client.js';
+import {
+    SlashCommandBuilder,
+    type ChatInputCommandInteraction,
+    type TextChannel,
+} from 'discord.js';
+import { type DiscordBot } from '../../../core/client.js';
 import triviaService from '../services/TriviaService.js';
 
 export const data = new SlashCommandBuilder()
@@ -9,7 +13,10 @@ export const data = new SlashCommandBuilder()
 export const execute = async (interaction: ChatInputCommandInteraction, client: DiscordBot) => {
     // Check permissions (simple check for now, can be improved)
     if (!interaction.memberPermissions?.has('Administrator')) {
-        await interaction.reply({ content: 'You do not have permission to use this command.', ephemeral: true });
+        await interaction.reply({
+            content: 'You do not have permission to use this command.',
+            ephemeral: true,
+        });
         return;
     }
 

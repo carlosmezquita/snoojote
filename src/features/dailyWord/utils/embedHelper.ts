@@ -1,29 +1,35 @@
 import { EmbedBuilder } from 'discord.js';
-import { WordEntryData } from '../services/raeService.js';
+import { type WordEntryData } from '../services/raeService.js';
 
 interface EmbedOptions {
     isDailyWord?: boolean;
 }
 
-export const createRaeEmbed = (word: string, definitionData: WordEntryData, options: EmbedOptions = {}): EmbedBuilder => {
+export const createRaeEmbed = (
+    word: string,
+    definitionData: WordEntryData,
+    options: EmbedOptions = {},
+): EmbedBuilder => {
     const embed = new EmbedBuilder()
         .setTitle(word)
-        .setURL(`https://dle.rae.es/${encodeURIComponent(word)}${options.isDailyWord ? '?m=wotd2' : ''}`)
+        .setURL(
+            `https://dle.rae.es/${encodeURIComponent(word)}${options.isDailyWord ? '?m=wotd2' : ''}`,
+        )
         .setColor(options.isDailyWord ? '#00b4d8' : '#caf0f8')
         .setFooter({
-            iconURL: "https://dle.rae.es/assets/images/dle.jpg",
-            text: `Diccionario de la lengua española`
+            iconURL: 'https://dle.rae.es/assets/images/dle.jpg',
+            text: `Diccionario de la lengua española`,
         })
         .setTimestamp();
 
     if (options.isDailyWord) {
         embed.setAuthor({
-            name: "Palabra del Día"
+            name: 'Palabra del Día',
         });
     }
 
     if (definitionData.meanings.length === 0) {
-        embed.setDescription("No se encontraron definiciones para esta palabra.");
+        embed.setDescription('No se encontraron definiciones para esta palabra.');
         return embed;
     }
 
@@ -52,7 +58,7 @@ export const createRaeEmbed = (word: string, definitionData: WordEntryData, opti
     }
 
     if (!description) {
-        description = "No se encontraron definiciones.";
+        description = 'No se encontraron definiciones.';
     }
 
     embed.setDescription(description);

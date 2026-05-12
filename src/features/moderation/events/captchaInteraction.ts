@@ -1,5 +1,5 @@
-import { Events, Interaction } from 'discord.js';
-import { DiscordBot } from '../../../core/client.js';
+import { Events, type Interaction } from 'discord.js';
+import { type DiscordBot } from '../../../core/client.js';
 import verificationService from '../services/VerificationService.js';
 
 export const name = Events.InteractionCreate;

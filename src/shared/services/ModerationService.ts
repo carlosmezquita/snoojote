@@ -1,4 +1,4 @@
-import { GuildMember, TextChannel, EmbedBuilder } from 'discord.js';
+import { type GuildMember, type TextChannel } from 'discord.js';
 import { createErrorEmbed, createWarningEmbed } from '../utils/embeds.js';
 
 export class ModerationService {
@@ -8,7 +8,9 @@ export class ModerationService {
 
         try {
             await member.send({
-                embeds: [createWarningEmbed('Advertencia', `Has recibido una advertencia: ${reason}`)]
+                embeds: [
+                    createWarningEmbed('Advertencia', `Has recibido una advertencia: ${reason}`),
+                ],
             });
         } catch (err) {
             console.error(`Could not DM user ${member.id}:`, err);
@@ -16,7 +18,12 @@ export class ModerationService {
 
         if (channel) {
             await channel.send({
-                embeds: [createWarningEmbed('Usuario Advertido', `${member.toString()} ha sido advertido.\n**Razón:** ${reason}`)]
+                embeds: [
+                    createWarningEmbed(
+                        'Usuario Advertido',
+                        `${member.toString()} ha sido advertido.\n**Razón:** ${reason}`,
+                    ),
+                ],
             });
         }
     }
@@ -24,7 +31,12 @@ export class ModerationService {
     async kick(member: GuildMember, reason: string, channel?: TextChannel): Promise<void> {
         try {
             await member.send({
-                embeds: [createErrorEmbed('Expulsado', `Has sido expulsado del servidor.\n**Razón:** ${reason}`)]
+                embeds: [
+                    createErrorEmbed(
+                        'Expulsado',
+                        `Has sido expulsado del servidor.\n**Razón:** ${reason}`,
+                    ),
+                ],
             });
         } catch (err) {
             console.error(`Could not DM user ${member.id}:`, err);
@@ -34,15 +46,30 @@ export class ModerationService {
 
         if (channel) {
             await channel.send({
-                embeds: [createErrorEmbed('Usuario Expulsado', `${member.toString()} ha sido expulsado.\n**Razón:** ${reason}`)]
+                embeds: [
+                    createErrorEmbed(
+                        'Usuario Expulsado',
+                        `${member.toString()} ha sido expulsado.\n**Razón:** ${reason}`,
+                    ),
+                ],
             });
         }
     }
 
-    async ban(member: GuildMember, reason: string, durationSeconds: number = 0, channel?: TextChannel): Promise<void> {
+    async ban(
+        member: GuildMember,
+        reason: string,
+        durationSeconds: number = 0,
+        channel?: TextChannel,
+    ): Promise<void> {
         try {
             await member.send({
-                embeds: [createErrorEmbed('Baneado', `Has sido baneado del servidor.\n**Razón:** ${reason}`)]
+                embeds: [
+                    createErrorEmbed(
+                        'Baneado',
+                        `Has sido baneado del servidor.\n**Razón:** ${reason}`,
+                    ),
+                ],
             });
         } catch (err) {
             console.error(`Could not DM user ${member.id}:`, err);
@@ -52,7 +79,12 @@ export class ModerationService {
 
         if (channel) {
             await channel.send({
-                embeds: [createErrorEmbed('Usuario Baneado', `${member.toString()} ha sido baneado.\n**Razón:** ${reason}`)]
+                embeds: [
+                    createErrorEmbed(
+                        'Usuario Baneado',
+                        `${member.toString()} ha sido baneado.\n**Razón:** ${reason}`,
+                    ),
+                ],
             });
         }
     }

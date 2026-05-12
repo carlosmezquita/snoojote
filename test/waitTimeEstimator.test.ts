@@ -74,14 +74,16 @@ describe('waitTimeEstimator', () => {
             },
         ];
 
-        expect(estimateWaitTimeMs({
-            recentTickets,
-            temporalTickets,
-            allTickets: temporalTickets,
-            now,
-            queueLength: 0,
-            activeStaff: 1,
-        })).toBe(minutes(21));
+        expect(
+            estimateWaitTimeMs({
+                recentTickets,
+                temporalTickets,
+                allTickets: temporalTickets,
+                now,
+                queueLength: 0,
+                activeStaff: 1,
+            }),
+        ).toBe(minutes(21));
     });
 
     test('formats capped duration as 24+ hours', () => {

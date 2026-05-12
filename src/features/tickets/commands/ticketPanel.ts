@@ -1,5 +1,12 @@
-import { SlashCommandBuilder, ChatInputCommandInteraction, EmbedBuilder, ActionRowBuilder, ButtonBuilder, TextChannel, ButtonStyle } from 'discord.js';
-import { DiscordBot } from '../../../core/client.js';
+import {
+    SlashCommandBuilder,
+    type ChatInputCommandInteraction,
+    EmbedBuilder,
+    ActionRowBuilder,
+    ButtonBuilder,
+    type TextChannel,
+} from 'discord.js';
+import { type DiscordBot } from '../../../core/client.js';
 
 import { ticketOptionsList } from '../config/options/index.js';
 import { mainTicketPanel } from '../config/panel.js';
@@ -32,7 +39,10 @@ export const execute = async (interaction: ChatInputCommandInteraction, client: 
     }
 
     if (mainTicketPanel.footerText) {
-        embed.setFooter({ text: mainTicketPanel.footerText, iconURL: mainTicketPanel.footerIconUrl });
+        embed.setFooter({
+            text: mainTicketPanel.footerText,
+            iconURL: mainTicketPanel.footerIconUrl,
+        });
     }
 
     if (mainTicketPanel.thumbnailUrl) {
@@ -64,6 +74,6 @@ export const execute = async (interaction: ChatInputCommandInteraction, client: 
     const channel = interaction.channel as TextChannel;
     if (channel) {
         await channel.send({ embeds: [embed], components: rows });
-        await interaction.reply({ content: "Panel enviado.", ephemeral: true });
+        await interaction.reply({ content: 'Panel enviado.', ephemeral: true });
     }
 };

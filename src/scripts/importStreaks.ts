@@ -6,7 +6,7 @@ import logger from '../utils/logger.js';
 
 const streaksPath = path.join(process.cwd(), 'data', 'streaks.json');
 
-(async () => {
+void (async () => {
     try {
         if (!fs.existsSync(streaksPath)) {
             logger.warn('streaks.json not found, skipping import.');
@@ -30,20 +30,21 @@ const streaksPath = path.join(process.cwd(), 'data', 'streaks.json');
             }
 
             if (streak > 0) {
-                await db.insert(streaks)
+                await db
+                    .insert(streaks)
                     .values({
                         userId,
                         streak,
                         highestStreak: streak,
-                        lastStreakDate: lastDate
+                        lastStreakDate: lastDate,
                     })
                     .onConflictDoUpdate({
                         target: streaks.userId,
                         set: {
                             streak,
                             highestStreak: streak,
-                            lastStreakDate: lastDate
-                        }
+                            lastStreakDate: lastDate,
+                        },
                     });
                 importedCount++;
             }

@@ -1,4 +1,4 @@
-import { Collection } from 'discord.js';
+import { type Collection } from 'discord.js';
 
 class InviteCacheService {
     private cache: Map<string, Collection<string, number>> = new Map();
