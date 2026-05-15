@@ -524,18 +524,18 @@ class VerificationService {
 
     private async sendLog(guild: Guild, text: string, client: DiscordBot) {
         try {
-            const channel = (await guild.channels.fetch(this.LOG_CHANNEL_ID).catch((error) => {
+            const channel = await guild.channels.fetch(this.LOG_CHANNEL_ID).catch((error) => {
                 client.logger.warn('Failed to fetch verification log channel', {
                     guildId: guild.id,
                     logChannelId: this.LOG_CHANNEL_ID,
                     error,
                 });
                 return null;
-            })) as TextChannel;
-            if (channel) {
+            });
+            if (channel && channel.isTextBased()) {
                 await channel.send(`🛡️ **Seguridad:** ${text}`);
             } else {
-                client.logger.warn('Verification log channel is unavailable', {
+                client.logger.warn('Verification log channel is unavailable or not text-based', {
                     guildId: guild.id,
                     logChannelId: this.LOG_CHANNEL_ID,
                 });

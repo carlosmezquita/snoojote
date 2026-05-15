@@ -2,7 +2,11 @@ import db from '../../../database/db.js';
 import { shopItems, userInventory } from '../../../database/schema.js';
 import { eq, and, asc } from 'drizzle-orm';
 import economyService from './economyService.js';
-import { PermissionFlagsBits, type ChatInputCommandInteraction } from 'discord.js';
+import {
+    PermissionFlagsBits,
+    type ChatInputCommandInteraction,
+    type GuildMember,
+} from 'discord.js';
 import { shopCatalog, type ShopItemConfig } from '../shopConfig.js';
 import logger from '../../../utils/logger.js';
 
@@ -106,7 +110,7 @@ export class ShopService {
         let paid = false;
         if (item.type === 'ROLE') {
             const roleId = item.value;
-            const member = interaction.member as any;
+            const member = interaction.member as GuildMember;
 
             if (!member || !interaction.guild) {
                 logger.warn('Shop role purchase failed outside a guild context', purchaseMetadata);
@@ -146,6 +150,26 @@ export class ShopService {
                     };
                 }
 
+                const botMember =
+                    interaction.guild.members.me ?? (await interaction.guild.members.fetchMe());
+                if (!botMember.permissions.has(PermissionFlagsBits.ManageRoles) || !role.editable) {
+                    logger.error('Shop role purchase failed due to bot permissions', {
+                        ...purchaseMetadata,
+                        roleId,
+                        roleName: role.name,
+                        botHasManageRoles: botMember.permissions.has(
+                            PermissionFlagsBits.ManageRoles,
+                        ),
+                        roleEditable: role.editable,
+                        botHighestRole: botMember.roles.highest.name,
+                    });
+                    return {
+                        success: false,
+                        message:
+                            'No pude asignar el rol. Verifica mis permisos (Gestión de Roles) y que el rol esté por debajo del mío.',
+                    };
+                }
+
                 paid = await economyService.spendBalance(userId, item.price);
                 if (!paid) {
                     logger.warn('Shop role purchase payment failed after balance check', {
@@ -156,21 +180,6 @@ export class ShopService {
                         success: false,
                         message: `No tienes suficientes Pesetas. Necesitas **${item.price} ₧**.`,
                     };
-                }
-
-                const botMember =
-                    interaction.guild.members.me ?? (await interaction.guild.members.fetchMe());
-                if (!botMember.permissions.has(PermissionFlagsBits.ManageRoles) || !role.editable) {
-                    logger.warn('Shop role purchase cannot assign role due to bot permissions', {
-                        ...purchaseMetadata,
-                        roleId,
-                        roleName: role.name,
-                        botHasManageRoles: botMember.permissions.has(
-                            PermissionFlagsBits.ManageRoles,
-                        ),
-                        roleEditable: role.editable,
-                        botHighestRole: botMember.roles.highest.name,
-                    });
                 }
 
                 await member.roles.add(role);
