@@ -4,6 +4,7 @@ import { eq, sql, desc, and } from 'drizzle-orm';
 import questService, { type QuestData } from './questService.js';
 import { type DiscordBot } from '../../../core/client.js';
 import { getDailyReward, getSpainDateKey } from '../../streaks/services/streakRules.js';
+import logger from '../../../utils/logger.js';
 
 export type EconomyEarningSource = 'MESSAGE' | 'VOICE';
 
@@ -115,7 +116,7 @@ export class EconomyService {
             if (e instanceof Error && e.message.includes('Rollback')) {
                 return false;
             }
-            console.error('Spend transaction failed:', e);
+            logger.error('Spend transaction failed', { userId, amount, error: e });
             return false;
         }
     }
@@ -158,7 +159,7 @@ export class EconomyService {
             if (e instanceof Error && e.message.includes('Rollback')) {
                 return false;
             }
-            console.error('Transfer transaction failed:', e);
+            logger.error('Transfer transaction failed', { senderId, receiverId, amount, error: e });
             return false;
         }
     }
@@ -323,7 +324,7 @@ export class EconomyService {
                     message: 'No se pudo reclamar, posible solicitud simultánea.',
                 };
             }
-            console.error('Claim Daily transaction failed:', e);
+            logger.error('Claim daily transaction failed', { userId, error: e });
             return { success: false, message: 'Ha ocurrido un error.' };
         }
     }

@@ -5,6 +5,7 @@ import { extractLinks, areLinksWhitelisted } from '../../../shared/utils/links.j
 import { createWarningEmbed, createErrorEmbed } from '../../../shared/utils/embeds.js';
 import { RateLimitService } from '../../../shared/services/RateLimitService.js';
 import moderationService from '../../../shared/services/ModerationService.js';
+import logger from '../../../utils/logger.js';
 
 const COOLDOWN_SECS = 60;
 const WARNS_LIMIT = 3;
@@ -55,7 +56,14 @@ async function handleSpam(message: Message, client: DiscordBot) {
         await sendAlertLog(message, alertsChannel, currentCount);
     }
 
-    await message.delete().catch(() => {});
+    await message.delete().catch((error) => {
+        client.logger.warn('Failed to delete link spam message', {
+            messageId: message.id,
+            channelId: message.channelId,
+            userId: message.author.id,
+            error,
+        });
+    });
 
     if (currentCount >= WARNS_LIMIT) {
         await banUser(message, alertsChannel);
@@ -73,7 +81,11 @@ async function sendWarning(message: Message, currentCount: number) {
             ],
         });
     } catch (err) {
-        console.error(`Failed to send warning to ${message.author.tag}:`, err);
+        logger.warn('Failed to send link spam warning DM', {
+            userId: message.author.id,
+            userTag: message.author.tag,
+            error: err,
+        });
     }
 }
 

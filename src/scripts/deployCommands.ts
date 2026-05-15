@@ -4,6 +4,7 @@ import { pathToFileURL } from 'url';
 import path from 'path';
 import { config } from '../config.js';
 import { assertBotConfigReady } from '../configLoader.js';
+import logger from '../utils/logger.js';
 import 'dotenv/config';
 
 const token = process.env.TOKEN;
@@ -13,11 +14,11 @@ const guildId = config.guildId;
 assertBotConfigReady();
 
 if (!token) {
-    console.error('Missing TOKEN in .env');
+    logger.error('Missing TOKEN in .env');
     process.exit(1);
 }
 if (!clientId) {
-    console.error('Missing CLIENT_ID in .env or config.ts');
+    logger.error('Missing CLIENT_ID in .env or config.ts');
     process.exit(1);
 }
 
@@ -37,27 +38,27 @@ void (async () => {
             if (cmd.data && cmd.execute) {
                 commands.push(cmd.data.toJSON());
             } else {
-                console.warn(
-                    `[WARNING] The command at ${file} is missing a required "data" or "execute" property.`,
-                );
+                logger.warn('Command module is missing data or execute property', { file });
             }
         }
 
         const rest = new REST().setToken(token);
 
-        console.log(`Started refreshing ${commands.length} application (/) commands.`);
+        logger.info('Started refreshing application commands', { commandCount: commands.length });
 
         // If GUILD_ID is present, deploy to guild (faster for dev), otherwise global
         if (guildId) {
-            console.log(`Deploying to guild: ${guildId}`);
+            logger.info('Deploying application commands to guild', { guildId });
             await rest.put(Routes.applicationGuildCommands(clientId, guildId), { body: commands });
         } else {
-            console.log('Deploying globally');
+            logger.info('Deploying application commands globally');
             await rest.put(Routes.applicationCommands(clientId), { body: commands });
         }
 
-        console.log(`Successfully reloaded ${commands.length} application (/) commands.`);
+        logger.info('Successfully reloaded application commands', {
+            commandCount: commands.length,
+        });
     } catch (error) {
-        console.error(error);
+        logger.error('Failed to deploy application commands', { error });
     }
 })();

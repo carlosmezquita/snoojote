@@ -6,7 +6,7 @@ export const name = Events.ClientReady;
 export const once = true;
 
 export const execute = async (client: DiscordBot) => {
-    client.logger.info('🛡️ Verifier Module: Caching Invites...');
+    client.logger.info('Caching guild invites', { guildCount: client.guilds.cache.size });
     client.guilds.cache.forEach(async (guild) => {
         try {
             const invites = await guild.invites.fetch();
@@ -15,7 +15,11 @@ export const execute = async (client: DiscordBot) => {
                 new Collection(invites.map((inv) => [inv.code, inv.uses || 0])),
             );
         } catch (e) {
-            client.logger.error(`❌ Error caching invites for ${guild.name}`);
+            client.logger.error('Failed to cache guild invites', {
+                guildId: guild.id,
+                guildName: guild.name,
+                error: e,
+            });
         }
     });
 };

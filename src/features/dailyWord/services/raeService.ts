@@ -1,3 +1,5 @@
+import logger from '../../../utils/logger.js';
+
 export interface RAEResponse<T> {
     ok: boolean;
     data?: T;
@@ -41,7 +43,7 @@ export class RAEService {
             const json = (await response.json()) as RAEResponse<WordOnlyData>;
             return json.ok && json.data ? json.data.word : null;
         } catch (error) {
-            console.error('Error fetching word of the day:', error);
+            logger.error('Failed to fetch word of the day', { error });
             return null;
         }
     }
@@ -64,7 +66,7 @@ export class RAEService {
                 suggestions: [],
             };
         } catch (error) {
-            console.error(`Error fetching definition for ${word}:`, error);
+            logger.error('Failed to fetch word definition', { word, error });
             return { data: null, suggestions: [] };
         }
     }

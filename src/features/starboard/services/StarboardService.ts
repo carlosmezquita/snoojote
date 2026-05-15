@@ -3,6 +3,7 @@ import db from '../../../database/db.js';
 import { starboardMessages } from '../../../database/schema.js';
 import { config } from '../../../config.js';
 import { eq } from 'drizzle-orm';
+import logger from '../../../utils/logger.js';
 
 export class StarboardService {
     public static async handleReactionUpdate(message: Message | PartialMessage) {
@@ -11,7 +12,11 @@ export class StarboardService {
             try {
                 fullMessage = await message.fetch();
             } catch (error) {
-                console.error('Something went wrong when fetching the message: ', error);
+                logger.warn('Failed to fetch partial message for starboard processing', {
+                    messageId: message.id,
+                    channelId: message.channelId,
+                    error,
+                });
                 return;
             }
         } else {
@@ -69,7 +74,11 @@ export class StarboardService {
                         embeds: [embed],
                     });
                 } catch (e) {
-                    console.error('Failed to update starboard message', e);
+                    logger.error('Failed to update starboard message', {
+                        originalMessageId: fullMessage.id,
+                        starboardMessageId: existing.starboardMessageId,
+                        error: e,
+                    });
                     // If message deleted manually from starboard channel, maybe we should treat it as "removed" or repost?
                     // For now, let's assume if it fails to fetch/edit, we might want to repost if it's 404
                 }

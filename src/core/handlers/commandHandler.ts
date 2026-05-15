@@ -21,9 +21,9 @@ export default async (client: DiscordBot) => {
 
         if (cmd.data && cmd.execute) {
             client.commands.set(cmd.data.name, cmd);
-            client.logger.info(`[Handler] Loaded command: ${cmd.data.name}`);
+            client.logger.debug('Loaded command handler', { command: cmd.data.name });
         } else {
-            client.logger.warn(`[Handler] Command at ${file} is missing data or execute property.`);
+            client.logger.warn('Command module is missing data or execute property', { file });
         }
     }
 
@@ -37,7 +37,12 @@ export default async (client: DiscordBot) => {
         try {
             await command.execute(interaction as ChatInputCommandInteraction, client);
         } catch (error) {
-            client.logger.error(error);
+            client.logger.error('Command execution failed', {
+                command: interaction.commandName,
+                userId: interaction.user.id,
+                guildId: interaction.guildId,
+                error,
+            });
             try {
                 if (interaction.replied || interaction.deferred) {
                     await interaction.followUp({
@@ -51,7 +56,11 @@ export default async (client: DiscordBot) => {
                     });
                 }
             } catch (err) {
-                client.logger.error(`Failed to send error message to user: ${err}`);
+                client.logger.error('Failed to send command error response', {
+                    command: interaction.commandName,
+                    userId: interaction.user.id,
+                    error: err,
+                });
             }
         }
     });

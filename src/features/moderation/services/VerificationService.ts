@@ -36,6 +36,12 @@ class VerificationService {
 
         try {
             await member.roles.add(this.SUSPECT_ROLE_ID);
+            client.logger.info('Assigned suspect role for verification', {
+                userId: member.id,
+                userTag: member.user.tag,
+                guildId: guild.id,
+                roleId: this.SUSPECT_ROLE_ID,
+            });
             await this.sendLog(
                 guild,
                 `🚨 **Nuevo Sospechoso:** <@${member.id}> (${member.user.tag})\n**Cuenta:** ${(accountAgeMs / (1000 * 60 * 60 * 24)).toFixed(1)} días.`,
@@ -59,7 +65,13 @@ class VerificationService {
             this.setupTimers(state, member, channel, client);
             verificationState.set(member.id, state);
         } catch (error) {
-            client.logger.error(`Trap Error for ${member.user.tag}: ${error}`);
+            client.logger.error('Failed to start verification trap flow', {
+                userId: member.id,
+                userTag: member.user.tag,
+                guildId: guild.id,
+                accountAgeDays: Number((accountAgeMs / (1000 * 60 * 60 * 24)).toFixed(1)),
+                error,
+            });
         }
     }
 
@@ -79,6 +91,11 @@ class VerificationService {
         const userState = verificationState.get(userId);
 
         if (!userState) {
+            client.logger.warn('Verification interaction received without active session', {
+                userId,
+                channelId: interaction.channelId,
+                customId: 'customId' in interaction ? interaction.customId : undefined,
+            });
             if (interaction.isRepliable()) {
                 await interaction.reply({
                     content: '⚠️ Error de sesión. Por favor reingresa.',
@@ -160,11 +177,23 @@ class VerificationService {
 
             client.emit('guildMemberVerified', interaction.member as GuildMember);
         } catch (err) {
-            client.logger.error(`Verification Success Cleanup Error for ${userId}: ${err}`);
+            client.logger.error('Verification success cleanup failed', {
+                userId,
+                guildId: interaction.guildId,
+                channelId: interaction.channelId,
+                error: err,
+            });
             if (interaction.isRepliable() && !interaction.replied && !interaction.deferred) {
                 await interaction
                     .reply({ content: 'Error de permisos.', ephemeral: true })
-                    .catch(() => {});
+                    .catch((replyError: unknown) => {
+                        client.logger.warn('Failed to send verification success error reply', {
+                            userId,
+                            guildId: interaction.guildId,
+                            channelId: interaction.channelId,
+                            error: replyError,
+                        });
+                    });
             }
         } finally {
             this.cleanupVerificationSession(
@@ -185,6 +214,13 @@ class VerificationService {
     ) {
         userState.attempts++;
         const attemptsLeft = this.MAX_ATTEMPTS - userState.attempts;
+        client.logger.info('Verification challenge failed', {
+            userId,
+            guildId: interaction.guildId,
+            channelId: interaction.channelId,
+            attempts: userState.attempts,
+            attemptsLeft,
+        });
         await this.sendLog(
             interaction.guild,
             `⚠️ **Fallo:** <@${userId}>. Quedan ${attemptsLeft} intentos.`,
@@ -203,14 +239,26 @@ class VerificationService {
                 );
                 await interaction.reply({ content: '❌ **Expulsado / Kicked**', ephemeral: true });
             } catch (e) {
-                client.logger.error(`Verification Failure Cleanup Error for ${userId}: ${e}`);
+                client.logger.error('Verification max-attempt cleanup failed', {
+                    userId,
+                    guildId: interaction.guildId,
+                    channelId: interaction.channelId,
+                    error: e,
+                });
                 if (interaction.isRepliable() && !interaction.replied && !interaction.deferred) {
                     await interaction
                         .reply({
                             content: 'No pude expulsar al usuario. Revisa permisos.',
                             ephemeral: true,
                         })
-                        .catch(() => {});
+                        .catch((replyError: unknown) => {
+                            client.logger.warn('Failed to send verification failure error reply', {
+                                userId,
+                                guildId: interaction.guildId,
+                                channelId: interaction.channelId,
+                                error: replyError,
+                            });
+                        });
                 }
             } finally {
                 this.cleanupVerificationSession(
@@ -238,15 +286,31 @@ class VerificationService {
                     });
                 }
             } catch (e) {
+                client.logger.warn('Failed to update verification challenge message', {
+                    userId,
+                    guildId: interaction.guildId,
+                    channelId: interaction.channelId,
+                    messageId: userState.mainMsgId,
+                    error: e,
+                });
                 // Fallback if edit fails
                 if (interaction.channel && interaction.channel.isTextBased()) {
                     const newPayload = await this.generateChallengePayload(
                         interaction.user.id,
                         attemptsLeft,
                     );
-                    const newMsg = await interaction.channel.send(newPayload as any);
-                    userState.mainMsgId = newMsg.id;
-                    verificationState.set(userId, userState);
+                    try {
+                        const newMsg = await interaction.channel.send(newPayload as any);
+                        userState.mainMsgId = newMsg.id;
+                        verificationState.set(userId, userState);
+                    } catch (sendError) {
+                        client.logger.error('Failed to send replacement verification challenge', {
+                            userId,
+                            guildId: interaction.guildId,
+                            channelId: interaction.channelId,
+                            error: sendError,
+                        });
+                    }
                 }
             }
         }
@@ -295,13 +359,40 @@ class VerificationService {
                     if (state.warningMsgId) {
                         const existingMsg = await channel.messages
                             .fetch(state.warningMsgId)
-                            .catch(() => null);
-                        if (existingMsg) await existingMsg.delete();
+                            .catch((error) => {
+                                client.logger.warn('Failed to fetch verification warning message', {
+                                    userId: member.id,
+                                    guildId: member.guild.id,
+                                    channelId: channel.id,
+                                    messageId: state.warningMsgId,
+                                    error,
+                                });
+                                return null;
+                            });
+                        if (existingMsg) {
+                            await existingMsg.delete().catch((error) => {
+                                client.logger.warn(
+                                    'Failed to delete previous verification warning message',
+                                    {
+                                        userId: member.id,
+                                        guildId: member.guild.id,
+                                        channelId: channel.id,
+                                        messageId: existingMsg.id,
+                                        error,
+                                    },
+                                );
+                            });
+                        }
                     }
                     const newMsg = await channel.send(`<@${member.id}> ⏳ **${text}**`);
                     state.warningMsgId = newMsg.id;
                 } catch (e) {
-                    client.logger.error(`Timer Error: ${e}`);
+                    client.logger.error('Verification timer failed', {
+                        userId: member.id,
+                        guildId: member.guild.id,
+                        channelId: channel.id,
+                        error: e,
+                    });
                 }
             }, ms);
             state.timeouts.push(tid);
@@ -314,7 +405,14 @@ class VerificationService {
         scheduleWarning(9.5 * 60 * 1000, '⚠️ **30 segundos restantes / 30 seconds remaining!**');
 
         const kickTid = setTimeout(async () => {
-            const currentMember = await member.guild.members.fetch(member.id).catch(() => null);
+            const currentMember = await member.guild.members.fetch(member.id).catch((error) => {
+                client.logger.warn('Failed to fetch member for verification timeout', {
+                    userId: member.id,
+                    guildId: member.guild.id,
+                    error,
+                });
+                return null;
+            });
             try {
                 if (currentMember && currentMember.roles.cache.has(this.SUSPECT_ROLE_ID)) {
                     await currentMember.kick('Tiempo agotado.');
@@ -337,7 +435,12 @@ class VerificationService {
                     );
                 }
             } catch (error) {
-                client.logger.error(`Verification Timeout Error for ${member.id}: ${error}`);
+                client.logger.error('Verification timeout handling failed', {
+                    userId: member.id,
+                    guildId: member.guild.id,
+                    channelId: channel.id,
+                    error,
+                });
             } finally {
                 this.cleanupVerificationSession(
                     member.id,
@@ -380,7 +483,11 @@ class VerificationService {
                     );
                 }
             } catch (error) {
-                client.logger.error(`Stale Verification Cleanup Error for ${guild.id}: ${error}`);
+                client.logger.error('Stale verification cleanup failed for guild', {
+                    guildId: guild.id,
+                    guildName: guild.name,
+                    error,
+                });
             }
         }
     }
@@ -417,12 +524,28 @@ class VerificationService {
 
     private async sendLog(guild: Guild, text: string, client: DiscordBot) {
         try {
-            const channel = (await guild.channels
-                .fetch(this.LOG_CHANNEL_ID)
-                .catch(() => null)) as TextChannel;
-            if (channel) await channel.send(`🛡️ **Seguridad:** ${text}`);
+            const channel = (await guild.channels.fetch(this.LOG_CHANNEL_ID).catch((error) => {
+                client.logger.warn('Failed to fetch verification log channel', {
+                    guildId: guild.id,
+                    logChannelId: this.LOG_CHANNEL_ID,
+                    error,
+                });
+                return null;
+            })) as TextChannel;
+            if (channel) {
+                await channel.send(`🛡️ **Seguridad:** ${text}`);
+            } else {
+                client.logger.warn('Verification log channel is unavailable', {
+                    guildId: guild.id,
+                    logChannelId: this.LOG_CHANNEL_ID,
+                });
+            }
         } catch (err) {
-            client.logger.error(`Log Error: ${err}`);
+            client.logger.error('Failed to send verification log message', {
+                guildId: guild.id,
+                logChannelId: this.LOG_CHANNEL_ID,
+                error: err,
+            });
         }
     }
 
@@ -474,28 +597,47 @@ class VerificationService {
         channel?: any,
     ) {
         try {
-            const target = channel ?? (await client.channels.fetch(channelId).catch(() => null));
+            const target =
+                channel ??
+                (await client.channels.fetch(channelId).catch((error) => {
+                    client.logger.warn('Failed to fetch verification channel for cleanup', {
+                        channelId,
+                        reason,
+                        error,
+                    });
+                    return null;
+                }));
 
             if (!target) {
-                client.logger.warn(
-                    `Verification Cleanup: channel ${channelId} already missing (${reason}).`,
-                );
+                client.logger.warn('Verification cleanup skipped because channel is missing', {
+                    channelId,
+                    reason,
+                });
                 return;
             }
 
             if (typeof target.delete !== 'function') {
                 client.logger.warn(
-                    `Verification Cleanup: channel ${channelId} is not deletable (${reason}).`,
+                    'Verification cleanup skipped because channel is not deletable',
+                    {
+                        channelId,
+                        reason,
+                    },
                 );
                 return;
             }
 
             await target.delete(`Verification cleanup: ${reason}`);
-            client.logger.info(`Verification Cleanup: deleted channel ${channelId} (${reason}).`);
+            client.logger.info('Verification channel deleted during cleanup', {
+                channelId,
+                reason,
+            });
         } catch (error) {
-            client.logger.error(
-                `Verification Cleanup: failed to delete channel ${channelId} (${reason}): ${error}`,
-            );
+            client.logger.error('Failed to delete verification channel during cleanup', {
+                channelId,
+                reason,
+                error,
+            });
         }
     }
 }

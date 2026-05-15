@@ -77,7 +77,13 @@ export const execute = async (interaction: Interaction, client: DiscordBot) => {
                     await interaction.editReply('Ticket marcado para eliminación.');
                 }
             } catch (error) {
-                client.logger.error(`Ticket Button Error: ${error}`);
+                client.logger.error('Ticket button action failed', {
+                    customId,
+                    userId: interaction.user.id,
+                    guildId: interaction.guildId,
+                    channelId: interaction.channelId,
+                    error,
+                });
                 await interaction.editReply('No se pudo gestionar el ticket.');
             }
             return;
@@ -106,7 +112,12 @@ export const execute = async (interaction: Interaction, client: DiscordBot) => {
                 );
                 await interaction.editReply('Ticket cerrado.');
             } catch (error) {
-                client.logger.error(`Ticket Close Error: ${error}`);
+                client.logger.error('Ticket close action failed', {
+                    userId: interaction.user.id,
+                    guildId: interaction.guildId,
+                    channelId: interaction.channelId,
+                    error,
+                });
                 await interaction.editReply('No se pudo cerrar el ticket.');
             }
             return;
@@ -157,14 +168,31 @@ export const execute = async (interaction: Interaction, client: DiscordBot) => {
                         modalData,
                     );
                     if (channel) {
+                        client.logger.info('Ticket created from interaction', {
+                            userId: interaction.user.id,
+                            guildId: interaction.guildId,
+                            channelId: channel.id,
+                            optionId,
+                        });
                         await interaction.editReply(`Ticket creado: ${channel.toString()}`);
                     } else {
+                        client.logger.info('Ticket creation rejected by open ticket limit', {
+                            userId: interaction.user.id,
+                            guildId: interaction.guildId,
+                            optionId,
+                            maxOpenPerUser: config.tickets.maxOpenPerUser,
+                        });
                         await interaction.editReply(
                             `Has alcanzado el límite de ${config.tickets.maxOpenPerUser} tickets abiertos.`,
                         );
                     }
                 } catch (error) {
-                    client.logger.error(`Ticket Create Error: ${error}`);
+                    client.logger.error('Ticket creation action failed', {
+                        userId: interaction.user.id,
+                        guildId: interaction.guildId,
+                        optionId,
+                        error,
+                    });
                     await interaction.editReply('Hubo un error al crear el ticket.');
                 }
             }

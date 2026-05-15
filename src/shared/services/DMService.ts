@@ -9,6 +9,7 @@ import {
 } from 'discord.js';
 import { Colors } from '../utils/embeds.js';
 import { config } from '../../config.js';
+import logger from '../../utils/logger.js';
 
 export enum DMType {
     Info = 'info',
@@ -50,9 +51,12 @@ export class DMService {
             await user.send({ embeds: [embed], files: files });
             return true;
         } catch (error) {
-            // Cannot DM user (blocked, closed DMs, etc.)
-            // We swallow the error here as we often can't do anything about it
-            // but return false so the caller knows it failed.
+            logger.debug('Failed to send direct message', {
+                userId: user.id,
+                dmType: type,
+                title,
+                error,
+            });
             return false;
         }
     }
@@ -67,6 +71,12 @@ export class DMService {
             await user.send({ embeds: [embed], files });
             return { dmSent: true, fallbackSent: false };
         } catch (error) {
+            logger.debug('Failed to send direct message, attempting fallback', {
+                userId: user.id,
+                dmType: options.type,
+                title: options.title,
+                error,
+            });
             const fallbackSent = await this.sendFallback(user, embed, options);
             return { dmSent: false, fallbackSent };
         }
@@ -115,9 +125,22 @@ export class DMService {
         const fallbackChannelId = options.fallbackChannelId || config.channels.bot;
         const fallbackChannel = (await user.client.channels
             .fetch(fallbackChannelId)
-            .catch(() => null)) as TextChannel | null;
+            .catch((error) => {
+                logger.warn('Failed to fetch DM fallback channel', {
+                    userId: user.id,
+                    fallbackChannelId,
+                    error,
+                });
+                return null;
+            })) as TextChannel | null;
 
-        if (!fallbackChannel || !fallbackChannel.isTextBased()) return false;
+        if (!fallbackChannel || !fallbackChannel.isTextBased()) {
+            logger.warn('DM fallback channel is unavailable or not text-based', {
+                userId: user.id,
+                fallbackChannelId,
+            });
+            return false;
+        }
 
         try {
             await fallbackChannel.send({
@@ -129,6 +152,11 @@ export class DMService {
             });
             return true;
         } catch (error) {
+            logger.warn('Failed to send DM fallback message', {
+                userId: user.id,
+                fallbackChannelId,
+                error,
+            });
             return false;
         }
     }

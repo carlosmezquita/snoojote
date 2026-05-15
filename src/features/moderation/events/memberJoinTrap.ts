@@ -9,7 +9,6 @@ export const name = Events.GuildMemberAdd;
 export const once = false;
 
 export const execute = async (member: GuildMember, client: DiscordBot) => {
-    client.logger.info(`👉 Event Triggered: User ${member.user.tag} joined.`);
     const guild = member.guild;
 
     const cachedInvites = inviteCache.get(guild.id);
@@ -24,7 +23,13 @@ export const execute = async (member: GuildMember, client: DiscordBot) => {
     // Update cache
     inviteCache.set(guild.id, new Collection(newInvites.map((inv) => [inv.code, inv.uses || 0])));
 
-    client.logger.info(`   -> Invite used: ${usedInvite ? usedInvite.code : 'Unknown'}`);
+    client.logger.info('Guild member joined', {
+        userId: member.id,
+        userTag: member.user.tag,
+        guildId: guild.id,
+        guildName: guild.name,
+        inviteCode: usedInvite?.code ?? 'unknown',
+    });
 
     const accountAgeMs = Date.now() - member.user.createdTimestamp;
     if (accountAgeMs > THREE_MONTHS_MS) {
@@ -32,7 +37,13 @@ export const execute = async (member: GuildMember, client: DiscordBot) => {
         return;
     }
 
-    client.logger.warn(`   -> 🚨 TRAP TRIGGERED for ${member.user.tag}`);
+    client.logger.warn('Verification trap triggered', {
+        userId: member.id,
+        userTag: member.user.tag,
+        guildId: guild.id,
+        accountAgeDays: Number((accountAgeMs / (1000 * 60 * 60 * 24)).toFixed(1)),
+        inviteCode: usedInvite?.code ?? 'unknown',
+    });
 
     await verificationService.handleMemberJoin(member, client, accountAgeMs);
 };

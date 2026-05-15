@@ -20,13 +20,28 @@ export const execute = async (interaction: Interaction, client: DiscordBot) => {
     try {
         if (member.roles.cache.has(ROLE_ID)) {
             await member.roles.remove(ROLE_ID);
+            client.logger.info('Removed rPlace role from member', {
+                userId: member.id,
+                guildId: interaction.guildId,
+                roleId: ROLE_ID,
+            });
             await interaction.reply({ content: 'Rol eliminado correctamente.', ephemeral: true });
         } else {
             await member.roles.add(ROLE_ID);
+            client.logger.info('Added rPlace role to member', {
+                userId: member.id,
+                guildId: interaction.guildId,
+                roleId: ROLE_ID,
+            });
             await interaction.reply({ content: 'Rol añadido correctamente.', ephemeral: true });
         }
     } catch (error) {
-        client.logger.error(`rPlace Role Error: ${error}`);
+        client.logger.error('Failed to toggle rPlace role', {
+            userId: member.id,
+            guildId: interaction.guildId,
+            roleId: ROLE_ID,
+            error,
+        });
         await interaction.reply({ content: 'Error al gestionar el rol.', ephemeral: true });
     }
 };

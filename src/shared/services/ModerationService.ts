@@ -1,5 +1,6 @@
 import { type GuildMember, type TextChannel } from 'discord.js';
 import { createErrorEmbed, createWarningEmbed } from '../utils/embeds.js';
+import logger from '../../utils/logger.js';
 
 export class ModerationService {
     async warn(member: GuildMember, reason: string, channel?: TextChannel): Promise<void> {
@@ -13,7 +14,7 @@ export class ModerationService {
                 ],
             });
         } catch (err) {
-            console.error(`Could not DM user ${member.id}:`, err);
+            logger.warn('Could not send moderation warning DM', { userId: member.id, error: err });
         }
 
         if (channel) {
@@ -39,7 +40,7 @@ export class ModerationService {
                 ],
             });
         } catch (err) {
-            console.error(`Could not DM user ${member.id}:`, err);
+            logger.warn('Could not send moderation kick DM', { userId: member.id, error: err });
         }
 
         await member.kick(reason);
@@ -72,7 +73,7 @@ export class ModerationService {
                 ],
             });
         } catch (err) {
-            console.error(`Could not DM user ${member.id}:`, err);
+            logger.warn('Could not send moderation ban DM', { userId: member.id, error: err });
         }
 
         await member.ban({ reason, deleteMessageSeconds: durationSeconds });

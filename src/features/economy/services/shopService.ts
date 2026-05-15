@@ -2,8 +2,9 @@ import db from '../../../database/db.js';
 import { shopItems, userInventory } from '../../../database/schema.js';
 import { eq, and, asc } from 'drizzle-orm';
 import economyService from './economyService.js';
-import { type ChatInputCommandInteraction } from 'discord.js';
+import { PermissionFlagsBits, type ChatInputCommandInteraction } from 'discord.js';
 import { shopCatalog, type ShopItemConfig } from '../shopConfig.js';
+import logger from '../../../utils/logger.js';
 
 export class ShopService {
     async getShopItems() {
@@ -40,18 +41,38 @@ export class ShopService {
         itemName: string,
     ): Promise<{ success: boolean; message: string }> {
         const item = await db.select().from(shopItems).where(eq(shopItems.name, itemName)).get();
+        const userId = interaction.user.id;
+        const guildId = interaction.guildId ?? 'unknown';
 
         if (!item) {
+            logger.warn('Shop purchase failed because item was not found', {
+                userId,
+                guildId,
+                requestedItemName: itemName,
+            });
             return { success: false, message: 'El artículo no existe.' };
         }
 
-        const userId = interaction.user.id;
         const isConsumable = item.type === 'CONSUMABLE';
         const catalogItem = this.getCatalogItem(item.name);
+        const purchaseMetadata = {
+            userId,
+            guildId,
+            itemId: item.id,
+            itemName: item.name,
+            itemType: item.type,
+            price: item.price,
+        };
+
+        logger.info('Shop purchase requested', purchaseMetadata);
 
         // Check Balance
         const balance = await economyService.getBalance(userId);
         if (balance < item.price) {
+            logger.info('Shop purchase rejected for insufficient balance', {
+                ...purchaseMetadata,
+                balance,
+            });
             return {
                 success: false,
                 message: `No tienes suficientes Pesetas. Necesitas **${item.price} ₧**.`,
@@ -66,12 +87,17 @@ export class ShopService {
             .get();
 
         if (existing && !isConsumable) {
+            logger.info('Shop purchase rejected because item is already owned', purchaseMetadata);
             return { success: false, message: 'Ya tienes este artículo.' };
         }
 
         if (item.type === 'ROLE') {
             const progressionResult = await this.validateRankProgression(userId, catalogItem);
             if (!progressionResult.success) {
+                logger.info('Shop purchase rejected by rank progression rules', {
+                    ...purchaseMetadata,
+                    reason: progressionResult.message,
+                });
                 return progressionResult;
             }
         }
@@ -83,6 +109,7 @@ export class ShopService {
             const member = interaction.member as any;
 
             if (!member || !interaction.guild) {
+                logger.warn('Shop role purchase failed outside a guild context', purchaseMetadata);
                 return {
                     success: false,
                     message: 'Error al asignar el rol. ¿Estás en el servidor?',
@@ -92,6 +119,10 @@ export class ShopService {
             try {
                 // Check if Role ID is the placeholder
                 if (roleId.startsWith('REPLACE') || roleId.includes('_HERE')) {
+                    logger.error('Shop role purchase failed because role ID is not configured', {
+                        ...purchaseMetadata,
+                        roleId,
+                    });
                     return {
                         success: false,
                         message:
@@ -102,6 +133,13 @@ export class ShopService {
                 const role = interaction.guild.roles.cache.get(roleId);
 
                 if (!role) {
+                    logger.error(
+                        'Shop role purchase failed because configured role was not found',
+                        {
+                            ...purchaseMetadata,
+                            roleId,
+                        },
+                    );
                     return {
                         success: false,
                         message: 'Error de configuración: El rol no existe en Discord.',
@@ -110,10 +148,29 @@ export class ShopService {
 
                 paid = await economyService.spendBalance(userId, item.price);
                 if (!paid) {
+                    logger.warn('Shop role purchase payment failed after balance check', {
+                        ...purchaseMetadata,
+                        balance,
+                    });
                     return {
                         success: false,
                         message: `No tienes suficientes Pesetas. Necesitas **${item.price} ₧**.`,
                     };
+                }
+
+                const botMember =
+                    interaction.guild.members.me ?? (await interaction.guild.members.fetchMe());
+                if (!botMember.permissions.has(PermissionFlagsBits.ManageRoles) || !role.editable) {
+                    logger.warn('Shop role purchase cannot assign role due to bot permissions', {
+                        ...purchaseMetadata,
+                        roleId,
+                        roleName: role.name,
+                        botHasManageRoles: botMember.permissions.has(
+                            PermissionFlagsBits.ManageRoles,
+                        ),
+                        roleEditable: role.editable,
+                        botHighestRole: botMember.roles.highest.name,
+                    });
                 }
 
                 await member.roles.add(role);
@@ -121,6 +178,12 @@ export class ShopService {
                 if (paid) {
                     await economyService.addBalance(userId, item.price);
                 }
+                logger.error('Shop role purchase failed during role assignment', {
+                    ...purchaseMetadata,
+                    roleId,
+                    refunded: paid,
+                    error,
+                });
                 return {
                     success: false,
                     message:
@@ -132,6 +195,10 @@ export class ShopService {
         if (!paid) {
             paid = await economyService.spendBalance(userId, item.price);
             if (!paid) {
+                logger.warn('Shop purchase payment failed after balance check', {
+                    ...purchaseMetadata,
+                    balance,
+                });
                 return {
                     success: false,
                     message: `No tienes suficientes Pesetas. Necesitas **${item.price} ₧**.`,
@@ -146,12 +213,18 @@ export class ShopService {
             });
         } catch (error) {
             await economyService.addBalance(userId, item.price);
+            logger.error('Shop purchase failed while saving inventory item', {
+                ...purchaseMetadata,
+                refunded: true,
+                error,
+            });
             return {
                 success: false,
                 message: 'No pude guardar la compra. Se ha reembolsado el importe.',
             };
         }
 
+        logger.info('Shop purchase completed', purchaseMetadata);
         return { success: true, message: `¡Has comprado **${item.name}** por ${item.price} ₧!` };
     }
 
@@ -219,7 +292,10 @@ export class ShopService {
         for (const dbItem of dbItems) {
             if (!configNames.includes(dbItem.name)) {
                 await db.delete(shopItems).where(eq(shopItems.id, dbItem.id));
-                console.log(`[Shop] Removed obsolete item: ${dbItem.name}`);
+                logger.info('Removed obsolete shop item', {
+                    itemId: dbItem.id,
+                    itemName: dbItem.name,
+                });
             }
         }
 

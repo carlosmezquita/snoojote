@@ -17,6 +17,7 @@ import { config } from '../../../config.js';
 import { createEmbed, Colors } from '../../../shared/utils/embeds.js';
 import { DMService, DMType } from '../../../shared/services/DMService.js';
 import { type TicketOptionConfig } from '../config/TicketConfig.js';
+import logger from '../../../utils/logger.js';
 
 type TicketRecord = typeof tickets.$inferSelect;
 
@@ -34,6 +35,13 @@ export class TicketService {
             .get();
 
         if ((existingOpenTickets?.value ?? 0) >= config.tickets.maxOpenPerUser) {
+            logger.info('Ticket creation rejected by open ticket limit', {
+                userId: user.id,
+                guildId: guild.id,
+                openTicketCount: existingOpenTickets?.value ?? 0,
+                maxOpenPerUser: config.tickets.maxOpenPerUser,
+                optionId: option.id,
+            });
             return null;
         }
 
@@ -93,6 +101,14 @@ export class TicketService {
                 staffOnlineAtCreation,
                 openTicketsAtCreation,
             });
+            logger.info('Ticket channel created', {
+                userId: user.id,
+                guildId: guild.id,
+                channelId: channel.id,
+                optionId: option.id,
+                staffOnlineAtCreation,
+                openTicketsAtCreation,
+            });
 
             const estimate = await responseTimeService.getEstimatedWaitTime(guild);
 
@@ -129,7 +145,12 @@ export class TicketService {
 
             return channel;
         } catch (error) {
-            console.error('Error creating ticket:', error);
+            logger.error('Failed to create ticket', {
+                userId: user.id,
+                guildId: guild.id,
+                optionId: option.id,
+                error,
+            });
             throw error;
         }
     }
@@ -214,8 +235,14 @@ export class TicketService {
                 SendMessages: false,
                 AttachFiles: false,
             })
-            .catch(() => {});
-
+            .catch((error) => {
+                logger.warn('Failed to update ticket owner permissions while closing ticket', {
+                    channelId: channel.id,
+                    ticketOwnerId: ticket.userId,
+                    closedBy: closer.id,
+                    error,
+                });
+            });
         const transcript = await this.generateTranscript(channel);
         await this.sendTranscriptToOwner(channel, ticket, closer, reason, transcript);
         await this.sendTranscriptToLog(channel, ticket, closer, reason, transcript);
@@ -247,7 +274,14 @@ export class TicketService {
                 SendMessages: true,
                 AttachFiles: true,
             })
-            .catch(() => {});
+            .catch((error) => {
+                logger.warn('Failed to restore ticket owner permissions while reopening ticket', {
+                    channelId: channel.id,
+                    ticketOwnerId: ticket.userId,
+                    reopenedBy: actor.id,
+                    error,
+                });
+            });
 
         await channel.send({
             content: `🔓 Ticket reabierto por ${actor.toString()}.`,
@@ -279,7 +313,13 @@ export class TicketService {
         });
 
         setTimeout(() => {
-            void channel.delete(`Ticket deleted by ${actor.tag}`).catch(() => {});
+            void channel.delete(`Ticket deleted by ${actor.tag}`).catch((error) => {
+                logger.error('Failed to delete ticket channel', {
+                    channelId: channel.id,
+                    deletedBy: actor.id,
+                    error,
+                });
+            });
         }, 5000);
     }
 
@@ -349,9 +389,15 @@ export class TicketService {
         transcript: string,
     ) {
         const owner = await channel.client.users.fetch(ticket.userId).catch(() => null);
-        if (!owner) return;
+        if (!owner) {
+            logger.warn('Failed to fetch ticket owner for transcript delivery', {
+                channelId: channel.id,
+                ticketOwnerId: ticket.userId,
+            });
+            return;
+        }
 
-        await DMService.send({
+        const dmSent = await DMService.send({
             user: owner,
             type: DMType.Info,
             title: 'Ticket Closed / Ticket Cerrado',
@@ -362,6 +408,12 @@ export class TicketService {
             ],
             files: [this.transcriptFile(channel, transcript)],
         });
+        if (!dmSent) {
+            logger.info('Ticket transcript DM was not delivered to owner', {
+                channelId: channel.id,
+                ticketOwnerId: ticket.userId,
+            });
+        }
     }
 
     private async sendTranscriptToLog(
@@ -373,13 +425,37 @@ export class TicketService {
     ) {
         const logChannel = await channel.client.channels
             .fetch(config.channels.transcripts)
-            .catch(() => null);
-        if (!logChannel || !logChannel.isTextBased() || !('send' in logChannel)) return;
+            .catch((error) => {
+                logger.warn('Failed to fetch ticket transcript log channel', {
+                    channelId: channel.id,
+                    transcriptChannelId: config.channels.transcripts,
+                    error,
+                });
+                return null;
+            });
+        if (!logChannel || !logChannel.isTextBased() || !('send' in logChannel)) {
+            logger.warn('Ticket transcript log channel is unavailable', {
+                channelId: channel.id,
+                transcriptChannelId: config.channels.transcripts,
+            });
+            return;
+        }
 
-        await logChannel.send({
-            content: `📄 Transcript for ${channel.name}\nOwner: <@${ticket.userId}>\nAction by: ${actor.toString()}\nReason: ${reason}`,
-            files: [this.transcriptFile(channel, transcript)],
-        });
+        try {
+            await logChannel.send({
+                content: `📄 Transcript for ${channel.name}\nOwner: <@${ticket.userId}>\nAction by: ${actor.toString()}\nReason: ${reason}`,
+                files: [this.transcriptFile(channel, transcript)],
+            });
+        } catch (error) {
+            logger.error('Failed to send ticket transcript to log channel', {
+                channelId: channel.id,
+                transcriptChannelId: config.channels.transcripts,
+                ticketOwnerId: ticket.userId,
+                actorId: actor.id,
+                error,
+            });
+            throw error;
+        }
     }
 }
 
