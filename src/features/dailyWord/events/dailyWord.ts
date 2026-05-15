@@ -4,7 +4,7 @@ import { type DiscordBot } from '../../../core/client.js';
 import raeService from '../services/raeService.js';
 import { config } from '../../../config.js';
 import { createRaeEmbed } from '../utils/embedHelper.js';
-import { DailyWordService } from '../services/dailyWordService.js';
+import { DailyWordService, getSpainHour } from '../services/dailyWordService.js';
 import { DrizzleDailyWordStore } from '../services/dailyWordStore.js';
 
 export const name = 'ready';
@@ -62,10 +62,10 @@ export const execute = (client: DiscordBot) => {
     );
     client.logger.info('Daily Word post cron scheduled for 10:00 Europe/Madrid');
 
-    setTimeout(() => {
-        void prepareDailyWord(client, 'startup-catch-up');
+    setTimeout(async () => {
+        await prepareDailyWord(client, 'startup-catch-up');
         if (getSpainHour(new Date()) >= 10) {
-            void postPreparedDailyWord(client, 'startup-catch-up');
+            await postPreparedDailyWord(client, 'startup-catch-up');
         }
     }, 10_000);
 };
@@ -96,10 +96,10 @@ export const postPreparedDailyWord = async (
         }
 
         const channelId = config.channels.wordOfTheDay || config.channels.main;
-        const channel = (await client.channels.fetch(channelId)) as TextChannel;
+        const channel = await client.channels.fetch(channelId);
 
-        if (!channel) {
-            throw new Error('Channel not found.');
+        if (!channel || !channel.isTextBased() || !('send' in channel)) {
+            throw new Error('Channel not found or cannot send messages.');
         }
 
         const embed = createRaeEmbed(prepared.word, prepared.definitionData, {
@@ -145,14 +145,4 @@ export const postDailyWord = async (client: DiscordBot, channelOverride?: TextCh
     await channel.send({ embeds: [embed] });
     client.logger.info(`Posted Word of the Day: ${word}`);
     return word;
-};
-
-const getSpainHour = (date: Date) => {
-    const hour = new Intl.DateTimeFormat('en-GB', {
-        timeZone: 'Europe/Madrid',
-        hour: '2-digit',
-        hourCycle: 'h23',
-    }).format(date);
-
-    return Number(hour);
 };

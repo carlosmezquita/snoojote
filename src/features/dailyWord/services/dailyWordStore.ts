@@ -32,35 +32,11 @@ export class DrizzleDailyWordStore implements DailyWordStore {
     }
 
     async upsert(entry: DailyWordCacheEntry): Promise<void> {
-        await db
-            .insert(dailyWordCache)
-            .values({
-                dateKey: entry.dateKey,
-                status: entry.status,
-                word: entry.word,
-                definitionData: entry.definitionData,
-                attempts: entry.attempts,
-                firstAttemptAt: entry.firstAttemptAt,
-                lastAttemptAt: entry.lastAttemptAt,
-                nextAttemptAt: entry.nextAttemptAt,
-                preparedAt: entry.preparedAt,
-                postedAt: entry.postedAt,
-                lastError: entry.lastError,
-            })
-            .onConflictDoUpdate({
-                target: dailyWordCache.dateKey,
-                set: {
-                    status: entry.status,
-                    word: entry.word,
-                    definitionData: entry.definitionData,
-                    attempts: entry.attempts,
-                    firstAttemptAt: entry.firstAttemptAt,
-                    lastAttemptAt: entry.lastAttemptAt,
-                    nextAttemptAt: entry.nextAttemptAt,
-                    preparedAt: entry.preparedAt,
-                    postedAt: entry.postedAt,
-                    lastError: entry.lastError,
-                },
-            });
+        const { dateKey: _dateKey, ...data } = entry;
+
+        await db.insert(dailyWordCache).values(entry).onConflictDoUpdate({
+            target: dailyWordCache.dateKey,
+            set: data,
+        });
     }
 }
