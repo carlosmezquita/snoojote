@@ -5,7 +5,7 @@ import {
     streaks,
     users,
 } from '../../../database/schema.js';
-import { eq, sql, desc, and } from 'drizzle-orm';
+import { eq, sql, desc, and, inArray } from 'drizzle-orm';
 import questService, { type QuestData } from './questService.js';
 import { type DiscordBot } from '../../../core/client.js';
 import { getDailyReward, getSpainDateKey } from '../../streaks/services/streakRules.js';
@@ -273,11 +273,10 @@ export class EconomyService {
     }
 
     private async releaseEconomyLocks(lockKeys: string[]): Promise<void> {
-        for (const lockKey of lockKeys) {
-            await db
-                .delete(economyTransactionLocks)
-                .where(eq(economyTransactionLocks.lockKey, lockKey));
-        }
+        if (lockKeys.length === 0) return;
+        await db
+            .delete(economyTransactionLocks)
+            .where(inArray(economyTransactionLocks.lockKey, lockKeys));
     }
 
     private getBalanceLockKey(userId: string): string {

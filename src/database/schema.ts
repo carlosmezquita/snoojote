@@ -127,13 +127,13 @@ export const shopPurchaseLocks = sqliteTable('shop_purchase_locks', {
     userId: text('user_id').notNull(),
     itemId: integer('item_id').notNull(),
     createdAt: integer('created_at', { mode: 'timestamp' })
-        .default(sql`(CURRENT_TIMESTAMP)`)
+        .default(sql`(unixepoch())`)
         .notNull(),
 });
 
 export const economyTransactionLocks = sqliteTable('economy_transaction_locks', {
     lockKey: text('lock_key').primaryKey(),
     createdAt: integer('created_at', { mode: 'timestamp' })
-        .default(sql`(CURRENT_TIMESTAMP)`)
+        .default(sql`(unixepoch())`)
         .notNull(),
 });
