@@ -95,51 +95,66 @@ export const execute = async (interaction: ChatInputCommandInteraction, client: 
     }
 
     if (action === 'pay') {
-        await handleAdminPay(interaction);
+        await handleAdminPay(interaction, client);
         return;
     }
 
     if (action === 'charge') {
-        await handleAdminCharge(interaction);
+        await handleAdminCharge(interaction, client);
     }
 };
 
-async function handleAdminPay(interaction: ChatInputCommandInteraction) {
+async function handleAdminPay(interaction: ChatInputCommandInteraction, client: DiscordBot) {
     const target = interaction.options.getUser('user', true);
     const amount = interaction.options.getInteger('amount', true);
 
     if (await rejectInvalidEconomyTarget(interaction, target)) return;
 
-    await economyService.addBalance(target.id, amount);
-    const balance = await economyService.getBalance(target.id);
+    await interaction.deferReply({ ephemeral: true });
 
-    await interaction.reply({
-        content: `✅ Se han añadido **${amount}** ₧ a ${target.toString()}. Saldo actual: **${balance}** ₧.`,
-        ephemeral: true,
-    });
+    try {
+        await economyService.addBalance(target.id, amount);
+        const balance = await economyService.getBalance(target.id);
+
+        await interaction.editReply({
+            content: `✅ Se han añadido **${amount}** ₧ a ${target.toString()}. Saldo actual: **${balance}** ₧.`,
+        });
+    } catch (error) {
+        client.logger.error(`Admin Pay Error: ${error}`);
+        await interaction.editReply({
+            content: '❌ Error al procesar el pago.',
+        });
+    }
 }
 
-async function handleAdminCharge(interaction: ChatInputCommandInteraction) {
+async function handleAdminCharge(interaction: ChatInputCommandInteraction, client: DiscordBot) {
     const target = interaction.options.getUser('user', true);
     const amount = interaction.options.getInteger('amount', true);
 
     if (await rejectInvalidEconomyTarget(interaction, target)) return;
 
-    const success = await economyService.spendBalance(target.id, amount);
-    if (!success) {
-        const balance = await economyService.getBalance(target.id);
-        await interaction.reply({
-            content: `❌ ${target.toString()} no tiene suficientes pesetas. Saldo actual: **${balance}** ₧.`,
-            ephemeral: true,
-        });
-        return;
-    }
+    await interaction.deferReply({ ephemeral: true });
 
-    const balance = await economyService.getBalance(target.id);
-    await interaction.reply({
-        content: `✅ Se han quitado **${amount}** ₧ a ${target.toString()}. Saldo actual: **${balance}** ₧.`,
-        ephemeral: true,
-    });
+    try {
+        const success = await economyService.spendBalance(target.id, amount);
+        const balance = await economyService.getBalance(target.id);
+
+        if (!success) {
+            await interaction.editReply({
+                content: `❌ ${target.toString()} no tiene suficientes pesetas. Saldo actual: **${balance}** ₧.`,
+            });
+            return;
+        }
+
+        await interaction.editReply({
+            content: `✅ Se han quitado **${amount}** ₧ a ${target.toString()}. Saldo actual: **${balance}** ₧.`,
+        });
+    } catch (error) {
+        client.logger.error(`Admin Charge Error: ${error}`);
+        await interaction.editReply({
+            content: '❌ Error al procesar el cargo.',
+        });
+    }
 }
 
 async function rejectInvalidEconomyTarget(
