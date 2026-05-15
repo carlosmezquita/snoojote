@@ -10,6 +10,8 @@ export const data = new SlashCommandBuilder()
         option.setName('user').setDescription('Usuario que quieres consultar').setRequired(false),
     );
 
+export const aliases = ['money', 'dinero'];
+
 export const execute = async (interaction: ChatInputCommandInteraction, client: DiscordBot) => {
     const target = interaction.options.getUser('user') || interaction.user;
     const balance = await economyService.getBalance(target.id);

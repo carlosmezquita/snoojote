@@ -22,6 +22,13 @@ export default async (client: DiscordBot) => {
         if (cmd.data && cmd.execute) {
             client.commands.set(cmd.data.name, cmd);
             client.logger.debug('Loaded command handler', { command: cmd.data.name });
+
+            if (cmd.aliases && Array.isArray(cmd.aliases)) {
+                for (const alias of cmd.aliases) {
+                    client.commands.set(alias, cmd);
+                    client.logger.debug('Loaded command alias', { alias, original: cmd.data.name });
+                }
+            }
         } else {
             client.logger.warn('Command module is missing data or execute property', { file });
         }

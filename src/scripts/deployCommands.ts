@@ -37,6 +37,14 @@ void (async () => {
 
             if (cmd.data && cmd.execute) {
                 commands.push(cmd.data.toJSON());
+
+                if (cmd.aliases && Array.isArray(cmd.aliases)) {
+                    for (const alias of cmd.aliases) {
+                        const aliasData = cmd.data.toJSON();
+                        aliasData.name = alias;
+                        commands.push(aliasData);
+                    }
+                }
             } else {
                 logger.warn('Command module is missing data or execute property', { file });
             }
