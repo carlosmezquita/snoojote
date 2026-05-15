@@ -98,6 +98,7 @@ export class TicketService {
                 channelId: channel.id,
                 userId: user.id,
                 status: 'open',
+                createdAt: new Date(),
                 staffOnlineAtCreation,
                 openTicketsAtCreation,
             });

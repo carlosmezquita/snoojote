@@ -57,6 +57,13 @@
       "when": 1778878067223,
       "tag": "0007_naive_masque",
       "breakpoints": true
+    },
+    {
+      "idx": 8,
+      "version": "6",
+      "when": 1778888463251,
+      "tag": "0008_superb_carnage",
+      "breakpoints": true
     }
   ]
 }

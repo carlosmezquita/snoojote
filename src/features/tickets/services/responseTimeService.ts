@@ -135,7 +135,12 @@ export class ResponseTimeService {
             .all();
 
         const recentTickets: TicketResponseData[] = recentRows
-            .filter((r) => r.firstResponseAt != null)
+            .filter(
+                (r) =>
+                    isFiniteDate(r.createdAt) &&
+                    r.firstResponseAt != null &&
+                    isFiniteDate(r.firstResponseAt),
+            )
             .map((r) => ({
                 createdAt: r.createdAt,
                 firstResponseAt: r.firstResponseAt!,
@@ -143,7 +148,7 @@ export class ResponseTimeService {
 
         // Step 2.2: H_{d,h} — temporal baseline (same day-of-week + 4-hour block, last 60 days)
         const sixtyDaysAgo = new Date(now.getTime() - 60 * 24 * 60 * 60 * 1000);
-        const currentParts = getTimeZoneParts(now);
+        const currentParts = getTimeZoneParts(now)!;
         const currentDay = currentParts.weekday;
         const currentBlock = getTimeBlock(currentParts.hour);
 
@@ -163,8 +168,15 @@ export class ResponseTimeService {
         // (SQLite timestamp mode makes SQL-level day/hour extraction impractical)
         const temporalTickets: TicketResponseData[] = historicalRows
             .filter((r) => {
-                if (!r.firstResponseAt) return false;
+                if (
+                    !isFiniteDate(r.createdAt) ||
+                    !r.firstResponseAt ||
+                    !isFiniteDate(r.firstResponseAt)
+                ) {
+                    return false;
+                }
                 const parts = getTimeZoneParts(r.createdAt);
+                if (!parts) return false;
                 return parts.weekday === currentDay && getTimeBlock(parts.hour) === currentBlock;
             })
             .map((r) => ({
@@ -174,7 +186,12 @@ export class ResponseTimeService {
 
         // All answered tickets (for global median fallback)
         const allTickets: TicketResponseData[] = historicalRows
-            .filter((r) => r.firstResponseAt != null)
+            .filter(
+                (r) =>
+                    isFiniteDate(r.createdAt) &&
+                    r.firstResponseAt != null &&
+                    isFiniteDate(r.firstResponseAt),
+            )
             .map((r) => ({
                 createdAt: r.createdAt,
                 firstResponseAt: r.firstResponseAt!,
@@ -202,7 +219,13 @@ export class ResponseTimeService {
 
 export default new ResponseTimeService();
 
-function getTimeZoneParts(date: Date): { weekday: number; hour: number } {
+function isFiniteDate(date: Date | null | undefined): date is Date {
+    return date instanceof Date && Number.isFinite(date.getTime());
+}
+
+function getTimeZoneParts(date: Date): { weekday: number; hour: number } | null {
+    if (!isFiniteDate(date)) return null;
+
     const formatter = new Intl.DateTimeFormat('en-US', {
         timeZone: ESTIMATION_TIME_ZONE,
         weekday: 'short',

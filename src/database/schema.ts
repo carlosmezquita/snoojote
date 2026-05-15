@@ -9,7 +9,7 @@ export const tickets = sqliteTable(
         userId: text('user_id').notNull(),
         status: text('status').default('open').notNull(),
         createdAt: integer('created_at', { mode: 'timestamp' })
-            .default(sql`(CURRENT_TIMESTAMP)`)
+            .default(sql`(unixepoch())`)
             .notNull(),
         firstResponseAt: integer('first_response_at', { mode: 'timestamp' }),
         closedAt: integer('closed_at', { mode: 'timestamp' }),
