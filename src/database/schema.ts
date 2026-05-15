@@ -64,6 +64,20 @@ export const economyDailyEarnings = sqliteTable(
     }),
 );
 
+export const dailyWordCache = sqliteTable('daily_word_cache', {
+    dateKey: text('date_key').primaryKey(),
+    status: text('status').default('pending').notNull(),
+    word: text('word'),
+    definitionData: text('definition_data', { mode: 'json' }),
+    attempts: integer('attempts').default(0).notNull(),
+    firstAttemptAt: integer('first_attempt_at', { mode: 'timestamp' }),
+    lastAttemptAt: integer('last_attempt_at', { mode: 'timestamp' }),
+    nextAttemptAt: integer('next_attempt_at', { mode: 'timestamp' }),
+    preparedAt: integer('prepared_at', { mode: 'timestamp' }),
+    postedAt: integer('posted_at', { mode: 'timestamp' }),
+    lastError: text('last_error'),
+});
+
 export const starboardMessages = sqliteTable(
     'starboard_messages',
     {
