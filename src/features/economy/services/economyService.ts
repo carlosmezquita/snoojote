@@ -1,12 +1,21 @@
 import db from '../../../database/db.js';
-import { economyDailyEarnings, streaks, users } from '../../../database/schema.js';
-import { eq, sql, desc, and } from 'drizzle-orm';
+import {
+    economyDailyEarnings,
+    economyTransactionLocks,
+    streaks,
+    users,
+} from '../../../database/schema.js';
+import { eq, sql, desc, and, inArray } from 'drizzle-orm';
 import questService, { type QuestData } from './questService.js';
 import { type DiscordBot } from '../../../core/client.js';
 import { getDailyReward, getSpainDateKey } from '../../streaks/services/streakRules.js';
 import logger from '../../../utils/logger.js';
 
 export type EconomyEarningSource = 'MESSAGE' | 'VOICE';
+
+const ECONOMY_LOCK_TTL_MS = 2 * 60 * 1000;
+const ECONOMY_LOCK_TIMEOUT_MS = 5_000;
+const ECONOMY_LOCK_RETRY_MS = 25;
 
 export function calculateCappedEarning(
     currentAmount: number,
@@ -29,13 +38,19 @@ export class EconomyService {
     }
 
     async addBalance(userId: string, amount: number): Promise<void> {
-        await db
-            .insert(users)
-            .values({ userId, points: amount })
-            .onConflictDoUpdate({
-                target: users.userId,
-                set: { points: sql`${users.points} + ${amount}` },
+        try {
+            await this.withEconomyLocks([this.getBalanceLockKey(userId)], async () => {
+                await db
+                    .insert(users)
+                    .values({ userId, points: amount })
+                    .onConflictDoUpdate({
+                        target: users.userId,
+                        set: { points: sql`${users.points} + ${amount}` },
+                    });
             });
+        } catch (e) {
+            logger.error('Add balance failed', { userId, amount, error: e });
+        }
     }
 
     async addCappedEarning(
@@ -47,70 +62,94 @@ export class EconomyService {
     ): Promise<number> {
         if (amount <= 0 || dailyCap <= 0) return 0;
 
-        return db.transaction((tx) => {
-            const dateKey = getSpainDateKey(now);
-            const existing = tx
-                .select()
-                .from(economyDailyEarnings)
-                .where(
-                    and(
-                        eq(economyDailyEarnings.userId, userId),
-                        eq(economyDailyEarnings.dateKey, dateKey),
-                        eq(economyDailyEarnings.source, source),
-                    ),
-                )
-                .get();
+        const dateKey = getSpainDateKey(now);
+        try {
+            return await this.withEconomyLocks(
+                [
+                    this.getBalanceLockKey(userId),
+                    this.getDailyEarningLockKey(userId, source, dateKey),
+                ],
+                () =>
+                    db.transaction((tx) => {
+                        const existing = tx
+                            .select()
+                            .from(economyDailyEarnings)
+                            .where(
+                                and(
+                                    eq(economyDailyEarnings.userId, userId),
+                                    eq(economyDailyEarnings.dateKey, dateKey),
+                                    eq(economyDailyEarnings.source, source),
+                                ),
+                            )
+                            .get();
 
-            const currentAmount = existing?.amount ?? 0;
-            const creditedAmount = calculateCappedEarning(currentAmount, amount, dailyCap);
-            if (creditedAmount <= 0) return 0;
+                        const currentAmount = existing?.amount ?? 0;
+                        const creditedAmount = calculateCappedEarning(
+                            currentAmount,
+                            amount,
+                            dailyCap,
+                        );
+                        if (creditedAmount <= 0) return 0;
 
-            tx.insert(users)
-                .values({ userId, points: creditedAmount })
-                .onConflictDoUpdate({
-                    target: users.userId,
-                    set: { points: sql`${users.points} + ${creditedAmount}` },
-                })
-                .run();
+                        tx.insert(users)
+                            .values({ userId, points: creditedAmount })
+                            .onConflictDoUpdate({
+                                target: users.userId,
+                                set: { points: sql`${users.points} + ${creditedAmount}` },
+                            })
+                            .run();
 
-            if (existing) {
-                tx.update(economyDailyEarnings)
-                    .set({ amount: currentAmount + creditedAmount })
-                    .where(eq(economyDailyEarnings.id, existing.id))
-                    .run();
-            } else {
-                tx.insert(economyDailyEarnings)
-                    .values({
-                        userId,
-                        dateKey,
-                        source,
-                        amount: creditedAmount,
-                    })
-                    .run();
-            }
+                        if (existing) {
+                            tx.update(economyDailyEarnings)
+                                .set({ amount: currentAmount + creditedAmount })
+                                .where(eq(economyDailyEarnings.id, existing.id))
+                                .run();
+                        } else {
+                            tx.insert(economyDailyEarnings)
+                                .values({
+                                    userId,
+                                    dateKey,
+                                    source,
+                                    amount: creditedAmount,
+                                })
+                                .run();
+                        }
 
-            return creditedAmount;
-        });
+                        return creditedAmount;
+                    }),
+            );
+        } catch (e) {
+            logger.error('Capped earning transaction failed', {
+                userId,
+                source,
+                amount,
+                dailyCap,
+                error: e,
+            });
+            return 0;
+        }
     }
 
     async spendBalance(userId: string, amount: number): Promise<boolean> {
         if (amount <= 0) return false;
 
         try {
-            return db.transaction((tx) => {
-                const spendResult = tx
-                    .update(users)
-                    .set({ points: sql`${users.points} - ${amount}` })
-                    .where(and(eq(users.userId, userId), sql`${users.points} >= ${amount}`))
-                    .returning({ userId: users.userId })
-                    .get();
+            return await this.withEconomyLocks([this.getBalanceLockKey(userId)], async () => {
+                return db.transaction((tx) => {
+                    const spendResult = tx
+                        .update(users)
+                        .set({ points: sql`${users.points} - ${amount}` })
+                        .where(and(eq(users.userId, userId), sql`${users.points} >= ${amount}`))
+                        .returning({ userId: users.userId })
+                        .get();
 
-                if (!spendResult) {
-                    tx.rollback();
-                    return false;
-                }
+                    if (!spendResult) {
+                        tx.rollback();
+                        return false;
+                    }
 
-                return true;
+                    return true;
+                });
             });
         } catch (e) {
             if (e instanceof Error && e.message.includes('Rollback')) {
@@ -124,32 +163,35 @@ export class EconomyService {
     async transfer(senderId: string, receiverId: string, amount: number): Promise<boolean> {
         if (amount <= 0 || senderId === receiverId) return false;
 
+        const lockKeys = [this.getBalanceLockKey(senderId), this.getBalanceLockKey(receiverId)];
         try {
-            return db.transaction((tx) => {
-                // Conditional update for the sender to ensure atomicity
-                const debitResult = tx
-                    .update(users)
-                    .set({ points: sql`${users.points} - ${amount}` })
-                    .where(and(eq(users.userId, senderId), sql`${users.points} >= ${amount}`))
-                    .returning({ userId: users.userId })
-                    .get();
+            return await this.withEconomyLocks(lockKeys, async () => {
+                return db.transaction((tx) => {
+                    // Conditional update for the sender to ensure atomicity
+                    const debitResult = tx
+                        .update(users)
+                        .set({ points: sql`${users.points} - ${amount}` })
+                        .where(and(eq(users.userId, senderId), sql`${users.points} >= ${amount}`))
+                        .returning({ userId: users.userId })
+                        .get();
 
-                // If no rows were updated, either the user doesn't exist or they have insufficient funds
-                if (!debitResult) {
-                    tx.rollback();
-                    return false;
-                }
+                    // If no rows were updated, either the user doesn't exist or they have insufficient funds
+                    if (!debitResult) {
+                        tx.rollback();
+                        return false;
+                    }
 
-                // If debit was successful, credit the receiver
-                tx.insert(users)
-                    .values({ userId: receiverId, points: amount })
-                    .onConflictDoUpdate({
-                        target: users.userId,
-                        set: { points: sql`${users.points} + ${amount}` },
-                    })
-                    .run();
+                    // If debit was successful, credit the receiver
+                    tx.insert(users)
+                        .values({ userId: receiverId, points: amount })
+                        .onConflictDoUpdate({
+                            target: users.userId,
+                            set: { points: sql`${users.points} + ${amount}` },
+                        })
+                        .run();
 
-                return true;
+                    return true;
+                });
             });
         } catch (e) {
             // tx.rollback() throws a special rollback error that Drizzle catches,
@@ -159,9 +201,98 @@ export class EconomyService {
             if (e instanceof Error && e.message.includes('Rollback')) {
                 return false;
             }
-            logger.error('Transfer transaction failed', { senderId, receiverId, amount, error: e });
+            logger.error('Transfer transaction failed', {
+                senderId,
+                receiverId,
+                amount,
+                error: e,
+            });
             return false;
         }
+    }
+
+    private async withEconomyLocks<T>(
+        lockKeys: string[],
+        operation: () => T | Promise<T>,
+    ): Promise<T> {
+        const sortedLockKeys = Array.from(new Set(lockKeys)).sort();
+        await this.acquireEconomyLocks(sortedLockKeys);
+
+        try {
+            return await operation();
+        } finally {
+            await this.releaseEconomyLocks(sortedLockKeys);
+        }
+    }
+
+    private async acquireEconomyLocks(lockKeys: string[]): Promise<void> {
+        const deadline = Date.now() + ECONOMY_LOCK_TIMEOUT_MS;
+
+        while (true) {
+            const acquired = this.tryAcquireEconomyLocks(lockKeys);
+            if (acquired) return;
+
+            if (Date.now() >= deadline) {
+                throw new Error(`Timed out acquiring economy locks: ${lockKeys.join(', ')}`);
+            }
+
+            await this.sleep(ECONOMY_LOCK_RETRY_MS);
+        }
+    }
+
+    private tryAcquireEconomyLocks(lockKeys: string[]): boolean {
+        try {
+            const staleBefore = new Date(Date.now() - ECONOMY_LOCK_TTL_MS);
+            return db.transaction((tx) => {
+                tx.delete(economyTransactionLocks)
+                    .where(sql`${economyTransactionLocks.createdAt} < ${staleBefore}`)
+                    .run();
+
+                for (const lockKey of lockKeys) {
+                    const lock = tx
+                        .insert(economyTransactionLocks)
+                        .values({ lockKey })
+                        .onConflictDoNothing()
+                        .returning({ lockKey: economyTransactionLocks.lockKey })
+                        .get();
+
+                    if (!lock) {
+                        tx.rollback();
+                        return false;
+                    }
+                }
+
+                return true;
+            });
+        } catch (e) {
+            if (e instanceof Error && e.message.includes('Rollback')) {
+                return false;
+            }
+            throw e;
+        }
+    }
+
+    private async releaseEconomyLocks(lockKeys: string[]): Promise<void> {
+        if (lockKeys.length === 0) return;
+        await db
+            .delete(economyTransactionLocks)
+            .where(inArray(economyTransactionLocks.lockKey, lockKeys));
+    }
+
+    private getBalanceLockKey(userId: string): string {
+        return `balance:${userId}`;
+    }
+
+    private getDailyEarningLockKey(
+        userId: string,
+        source: EconomyEarningSource,
+        dateKey: string,
+    ): string {
+        return `daily-earning:${userId}:${source}:${dateKey}`;
+    }
+
+    private async sleep(ms: number): Promise<void> {
+        await new Promise((resolve) => setTimeout(resolve, ms));
     }
 
     async getLeaderboard(limit: number = 10): Promise<{ user_id: string; points: number }[]> {
