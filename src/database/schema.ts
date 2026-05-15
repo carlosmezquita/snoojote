@@ -121,3 +121,19 @@ export const userInventory = sqliteTable(
         userItemIdx: index('inventory_user_item_idx').on(table.userId, table.itemId),
     }),
 );
+
+export const shopPurchaseLocks = sqliteTable('shop_purchase_locks', {
+    lockKey: text('lock_key').primaryKey(),
+    userId: text('user_id').notNull(),
+    itemId: integer('item_id').notNull(),
+    createdAt: integer('created_at', { mode: 'timestamp' })
+        .default(sql`(CURRENT_TIMESTAMP)`)
+        .notNull(),
+});
+
+export const economyTransactionLocks = sqliteTable('economy_transaction_locks', {
+    lockKey: text('lock_key').primaryKey(),
+    createdAt: integer('created_at', { mode: 'timestamp' })
+        .default(sql`(CURRENT_TIMESTAMP)`)
+        .notNull(),
+});

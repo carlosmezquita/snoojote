@@ -108,7 +108,7 @@ export const execute = async (interaction: ChatInputCommandInteraction, client: 
                 guildId: interaction.guildId,
                 itemName,
             });
-            const result = await shopService.buyItem(interaction, itemName);
+            const result = await shopService.buyItem(i, itemName);
 
             const resultEmbed = createEmbed(
                 result.success ? '¡Compra Exitosa!' : 'Error en la Compra',
