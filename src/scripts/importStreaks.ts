@@ -52,7 +52,6 @@ void (async () => {
 
         logger.info(`Imported ${importedCount} streaks successfully.`);
     } catch (error) {
-        logger.error('Failed to import streaks:');
-        console.error(error);
+        logger.error('Failed to import streaks', { error });
     }
 })();

@@ -103,6 +103,11 @@ export const execute = async (interaction: ChatInputCommandInteraction, client: 
         if (i.customId === 'confirm_buy') {
             await i.deferUpdate();
 
+            client.logger.info('Shop purchase confirmed by user', {
+                userId: interaction.user.id,
+                guildId: interaction.guildId,
+                itemName,
+            });
             const result = await shopService.buyItem(interaction, itemName);
 
             const resultEmbed = createEmbed(
@@ -116,6 +121,11 @@ export const execute = async (interaction: ChatInputCommandInteraction, client: 
                 components: [],
             });
         } else if (i.customId === 'cancel_buy') {
+            client.logger.info('Shop purchase cancelled by user', {
+                userId: interaction.user.id,
+                guildId: interaction.guildId,
+                itemName,
+            });
             await i.update({
                 content: 'Compra cancelada.',
                 embeds: [],
@@ -133,7 +143,12 @@ export const execute = async (interaction: ChatInputCommandInteraction, client: 
                     components: [],
                 });
             } catch (e) {
-                // Ignore
+                client.logger.warn('Failed to update expired shop purchase confirmation', {
+                    userId: interaction.user.id,
+                    guildId: interaction.guildId,
+                    itemName,
+                    error: e,
+                });
             }
         }
     });

@@ -22,7 +22,7 @@ export default async (client: DiscordBot) => {
             } else {
                 client.on(event.name, (...args) => event.execute(...args, client));
             }
-            client.logger.info(`[Handler] Loaded event: ${event.name}`);
+            client.logger.debug('Loaded event handler', { event: event.name });
         }
     }
 };
