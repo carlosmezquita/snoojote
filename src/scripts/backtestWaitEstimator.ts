@@ -9,6 +9,14 @@ import {
 } from '../features/tickets/services/waitTimeEstimator.js';
 
 const ESTIMATION_TIME_ZONE = 'Europe/Madrid';
+const STAFF_HISTORY_WINDOW_MS = 90 * 24 * 60 * 60 * 1000;
+const RECENT_ACTIVITY_WINDOW_MS = 7 * 24 * 60 * 60 * 1000;
+const timeZoneFormatter = new Intl.DateTimeFormat('en-US', {
+    timeZone: ESTIMATION_TIME_ZONE,
+    weekday: 'short',
+    hour: '2-digit',
+    hourCycle: 'h23',
+});
 
 const rows = await db
     .select({
@@ -30,6 +38,11 @@ type AnsweredTicket = (typeof rows)[number] & {
     firstResponseAt: Date;
 };
 
+interface BacktestStaffState {
+    samples: { occurredAt: Date; responseTimeMs: number }[];
+    recentActivity: Date[];
+}
+
 const answeredTickets = rows.filter(
     (row): row is AnsweredTicket =>
         isFiniteDate(row.createdAt) &&
@@ -39,37 +52,41 @@ const answeredTickets = rows.filter(
 );
 
 const results: { id: number; predictedMs: number; actualMs: number; errorMs: number }[] = [];
+const priorTickets: AnsweredTicket[] = [];
+const staffProfileState = new Map<string, BacktestStaffState>();
 
-for (let index = 0; index < answeredTickets.length; index += 1) {
-    const ticket = answeredTickets[index];
-    const priorTickets = answeredTickets.slice(0, index);
+for (const ticket of answeredTickets) {
+    pruneStaffProfileState(staffProfileState, ticket.createdAt);
 
-    if (priorTickets.length === 0) continue;
+    if (priorTickets.length > 0) {
+        const now = ticket.createdAt;
+        const recentTickets = toTicketResponseData(priorTickets.slice(-20).reverse());
+        const allTickets = toTicketResponseData(priorTickets);
+        const temporalTickets = toTemporalTickets(priorTickets, now);
+        const staffProfiles = buildHistoricalStaffProfiles(staffProfileState);
+        const queueLength = Math.max(ticket.openTicketsAtCreation ?? 0, 0);
 
-    const now = ticket.createdAt;
-    const recentTickets = toTicketResponseData(priorTickets.slice(-20).reverse());
-    const allTickets = toTicketResponseData(priorTickets);
-    const temporalTickets = toTemporalTickets(priorTickets, now);
-    const staffProfiles = buildHistoricalStaffProfiles(priorTickets, now);
-    const queueLength = Math.max(ticket.openTicketsAtCreation ?? 0, 0);
+        const estimate = estimateWaitTime({
+            recentTickets,
+            temporalTickets,
+            allTickets,
+            staffProfiles,
+            now,
+            queueLength,
+            activeStaff: ticket.staffCapacityAtCreation ?? ticket.staffOnlineAtCreation ?? 0,
+        });
 
-    const estimate = estimateWaitTime({
-        recentTickets,
-        temporalTickets,
-        allTickets,
-        staffProfiles,
-        now,
-        queueLength,
-        activeStaff: ticket.staffCapacityAtCreation ?? ticket.staffOnlineAtCreation ?? 0,
-    });
+        const actualMs = ticket.firstResponseAt.getTime() - ticket.createdAt.getTime();
+        results.push({
+            id: ticket.id,
+            predictedMs: estimate.estimatedMs,
+            actualMs,
+            errorMs: estimate.estimatedMs - actualMs,
+        });
+    }
 
-    const actualMs = ticket.firstResponseAt.getTime() - ticket.createdAt.getTime();
-    results.push({
-        id: ticket.id,
-        predictedMs: estimate.estimatedMs,
-        actualMs,
-        errorMs: estimate.estimatedMs - actualMs,
-    });
+    addStaffProfileSample(staffProfileState, ticket);
+    priorTickets.push(ticket);
 }
 
 if (results.length === 0) {
@@ -121,37 +138,57 @@ function toTemporalTickets(source: AnsweredTicket[], now: Date): TicketResponseD
     );
 }
 
-function buildHistoricalStaffProfiles(source: AnsweredTicket[], now: Date): StaffResponseProfile[] {
-    const byStaff = new Map<
-        string,
-        { samples: { occurredAt: Date; responseTimeMs: number }[]; recentActivityCount: number }
-    >();
-    const sevenDaysAgo = now.getTime() - 7 * 24 * 60 * 60 * 1000;
-
-    for (const ticket of source) {
-        if (!ticket.firstResponseBy) continue;
-
-        const responseTimeMs = ticket.firstResponseAt.getTime() - ticket.createdAt.getTime();
-        const existing = byStaff.get(ticket.firstResponseBy);
-        const recentActivityCount =
-            (existing?.recentActivityCount ?? 0) +
-            (ticket.firstResponseAt.getTime() >= sevenDaysAgo ? 1 : 0);
-
-        byStaff.set(ticket.firstResponseBy, {
-            samples: [
-                ...(existing?.samples ?? []),
-                { occurredAt: ticket.firstResponseAt, responseTimeMs },
-            ],
-            recentActivityCount,
-        });
-    }
-
-    return [...byStaff.entries()].map(([staffId, sample]) => ({
+function buildHistoricalStaffProfiles(
+    staffState: Map<string, BacktestStaffState>,
+): StaffResponseProfile[] {
+    return [...staffState.entries()].map(([staffId, state]) => ({
         staffId,
         status: 'online',
-        recentActivityCount: sample.recentActivityCount,
-        firstResponseSamples: sample.samples,
+        recentActivityCount: state.recentActivity.length,
+        firstResponseSamples: state.samples,
     }));
+}
+
+function addStaffProfileSample(
+    staffState: Map<string, BacktestStaffState>,
+    ticket: AnsweredTicket,
+): void {
+    if (!ticket.firstResponseBy) return;
+
+    const state = staffState.get(ticket.firstResponseBy) ?? {
+        samples: [],
+        recentActivity: [],
+    };
+    const responseTimeMs = ticket.firstResponseAt.getTime() - ticket.createdAt.getTime();
+
+    state.samples.push({ occurredAt: ticket.firstResponseAt, responseTimeMs });
+    state.recentActivity.push(ticket.firstResponseAt);
+    staffState.set(ticket.firstResponseBy, state);
+}
+
+function pruneStaffProfileState(staffState: Map<string, BacktestStaffState>, now: Date): void {
+    const staffHistoryCutoff = now.getTime() - STAFF_HISTORY_WINDOW_MS;
+    const recentActivityCutoff = now.getTime() - RECENT_ACTIVITY_WINDOW_MS;
+
+    for (const [staffId, state] of staffState.entries()) {
+        while (
+            state.samples.length > 0 &&
+            state.samples[0].occurredAt.getTime() < staffHistoryCutoff
+        ) {
+            state.samples.shift();
+        }
+
+        while (
+            state.recentActivity.length > 0 &&
+            state.recentActivity[0].getTime() < recentActivityCutoff
+        ) {
+            state.recentActivity.shift();
+        }
+
+        if (state.samples.length === 0 && state.recentActivity.length === 0) {
+            staffState.delete(staffId);
+        }
+    }
 }
 
 function median(values: number[]): number {
@@ -173,15 +210,8 @@ function isFiniteDate(date: Date | null | undefined): date is Date {
 function getTimeZoneParts(date: Date): { weekday: number; hour: number; block: number } | null {
     if (!isFiniteDate(date)) return null;
 
-    const formatter = new Intl.DateTimeFormat('en-US', {
-        timeZone: ESTIMATION_TIME_ZONE,
-        weekday: 'short',
-        hour: '2-digit',
-        hourCycle: 'h23',
-    });
-
     const parts = Object.fromEntries(
-        formatter
+        timeZoneFormatter
             .formatToParts(date)
             .filter((part) => part.type !== 'literal')
             .map((part) => [part.type, part.value]),

@@ -13,6 +13,7 @@ import {
     type StaffResponseProfile,
     type StaffStatus,
     type TicketResponseData,
+    computeMedian,
     computePresenceWeight,
     getTimeBlock,
     estimateWaitTime,
@@ -32,9 +33,30 @@ interface StaffCacheEntry {
     fetchedAt: number;
 }
 
+interface EnrichedStaffProfileCacheEntry {
+    profiles: StaffResponseProfile[];
+    fetchedAt: number;
+}
+
+interface HistoricalLoadCacheEntry {
+    value: number;
+    fetchedAt: number;
+}
+
 const STAFF_CACHE_TTL_MS = 5 * 60 * 1000; // 5 minutes
+const PROFILE_CACHE_TTL_MS = 5 * 60 * 1000;
+const HISTORICAL_LOAD_CACHE_TTL_MS = 5 * 60 * 1000;
+const EPSILON_STAFF_CAPACITY = 0.25;
 const staffCache = new Map<string, StaffCacheEntry>();
+const enrichedStaffProfileCache = new Map<string, EnrichedStaffProfileCacheEntry>();
+let historicalLoadCache: HistoricalLoadCacheEntry | null = null;
 const ESTIMATION_TIME_ZONE = 'Europe/Madrid';
+const timeZoneFormatter = new Intl.DateTimeFormat('en-US', {
+    timeZone: ESTIMATION_TIME_ZONE,
+    weekday: 'short',
+    hour: '2-digit',
+    hourCycle: 'h23',
+});
 
 export class ResponseTimeService {
     /**
@@ -66,6 +88,7 @@ export class ResponseTimeService {
 
             if (updatedTicket) {
                 responseTimeMs = candidateResponseTimeMs;
+                historicalLoadCache = null;
             }
         }
 
@@ -77,6 +100,7 @@ export class ResponseTimeService {
             occurredAt: timestamp,
             responseTimeMs,
         });
+        enrichedStaffProfileCache.clear();
     }
 
     /**
@@ -294,6 +318,7 @@ export class ResponseTimeService {
             staffProfiles,
             now,
             queueLength,
+            historicalBaselineLoad: this.getCachedHistoricalBaselineLoad(allTickets),
         });
 
         logger.debug('Ticket wait estimate generated', {
@@ -346,6 +371,19 @@ export class ResponseTimeService {
         if (staffProfiles.length === 0) return [];
 
         const staffIds = staffProfiles.map((staff) => staff.staffId);
+        const cacheKey = [...staffIds].sort().join(':');
+        const cached = enrichedStaffProfileCache.get(cacheKey);
+
+        if (cached && Date.now() - cached.fetchedAt < PROFILE_CACHE_TTL_MS) {
+            const byStaffId = new Map(cached.profiles.map((profile) => [profile.staffId, profile]));
+
+            return staffProfiles.map((staff) => ({
+                ...staff,
+                recentActivityCount: byStaffId.get(staff.staffId)?.recentActivityCount ?? 0,
+                firstResponseSamples: byStaffId.get(staff.staffId)?.firstResponseSamples ?? [],
+            }));
+        }
+
         const ninetyDaysAgo = new Date(now.getTime() - 90 * 24 * 60 * 60 * 1000);
         const sevenDaysAgo = new Date(now.getTime() - 7 * 24 * 60 * 60 * 1000);
 
@@ -401,11 +439,51 @@ export class ResponseTimeService {
             recentActivityRows.map((row) => [row.staffId, row.value]),
         );
 
-        return staffProfiles.map((staff) => ({
+        const enrichedProfiles = staffProfiles.map((staff) => ({
             ...staff,
             recentActivityCount: recentActivityByStaff.get(staff.staffId) ?? 0,
             firstResponseSamples: samplesByStaff.get(staff.staffId) ?? [],
         }));
+
+        enrichedStaffProfileCache.set(cacheKey, {
+            profiles: enrichedProfiles,
+            fetchedAt: Date.now(),
+        });
+
+        return enrichedProfiles;
+    }
+
+    private getCachedHistoricalBaselineLoad(tickets: TicketResponseData[]): number {
+        if (
+            historicalLoadCache &&
+            Date.now() - historicalLoadCache.fetchedAt < HISTORICAL_LOAD_CACHE_TTL_MS
+        ) {
+            return historicalLoadCache.value;
+        }
+
+        const loads = tickets
+            .map((ticket) => {
+                if (
+                    ticket.openTicketsAtCreation == null ||
+                    ticket.staffCapacityAtCreation == null ||
+                    !Number.isFinite(ticket.openTicketsAtCreation) ||
+                    !Number.isFinite(ticket.staffCapacityAtCreation)
+                ) {
+                    return null;
+                }
+
+                return (
+                    (Math.max(ticket.openTicketsAtCreation, 0) + 1) /
+                    Math.max(ticket.staffCapacityAtCreation, EPSILON_STAFF_CAPACITY)
+                );
+            })
+            .filter(
+                (value): value is number => value != null && Number.isFinite(value) && value > 0,
+            );
+
+        const value = loads.length > 0 ? computeMedian(loads) : 1;
+        historicalLoadCache = { value, fetchedAt: Date.now() };
+        return value;
     }
 }
 
@@ -418,15 +496,8 @@ function isFiniteDate(date: Date | null | undefined): date is Date {
 function getTimeZoneParts(date: Date): { weekday: number; hour: number } | null {
     if (!isFiniteDate(date)) return null;
 
-    const formatter = new Intl.DateTimeFormat('en-US', {
-        timeZone: ESTIMATION_TIME_ZONE,
-        weekday: 'short',
-        hour: '2-digit',
-        hourCycle: 'h23',
-    });
-
     const parts = Object.fromEntries(
-        formatter
+        timeZoneFormatter
             .formatToParts(date)
             .filter((part) => part.type !== 'literal')
             .map((part) => [part.type, part.value]),

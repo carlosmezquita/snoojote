@@ -58,6 +58,8 @@ export interface EstimationInput {
      * Prefer weighted capacity from staffProfiles.
      */
     activeStaff?: number;
+    /** Optional precomputed historical load median. */
+    historicalBaselineLoad?: number;
 }
 
 export interface EstimationFactors {
@@ -245,7 +247,8 @@ export function estimateWaitTime(input: EstimationInput): EstimationResult {
     const currentStaffCapacity =
         staffProfiles.length > 0 ? profileCapacity : Math.max(input.activeStaff ?? 0, 0);
     const currentLoad = computeCurrentLoad(queueLength, currentStaffCapacity);
-    const historicalBaselineLoad = computeHistoricalBaselineLoad(allTickets);
+    const historicalBaselineLoad =
+        input.historicalBaselineLoad ?? computeHistoricalBaselineLoad(allTickets);
     const loadMultiplier = clamp(
         currentLoad / historicalBaselineLoad,
         MIN_LOAD_MULTIPLIER,
