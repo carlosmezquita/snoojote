@@ -5,13 +5,14 @@ import {
     ActionRowBuilder,
     ButtonBuilder,
     type TextChannel,
+    type GuildMember,
+    PermissionFlagsBits,
 } from 'discord.js';
 import { type DiscordBot } from '../../../core/client.js';
 
 import { ticketOptionsList } from '../config/options/index.js';
 import { mainTicketPanel } from '../config/panel.js';
 
-import { GuildMember, PermissionFlagsBits } from 'discord.js';
 import { isStaff } from '../../../shared/utils/permissions.js';
 
 export const data = new SlashCommandBuilder()
@@ -22,8 +23,9 @@ export const data = new SlashCommandBuilder()
 export const execute = async (interaction: ChatInputCommandInteraction, client: DiscordBot) => {
     if (!interaction.inGuild()) return;
 
-    const member = (interaction.member as GuildMember) || 
-        await interaction.guild!.members.fetch(interaction.user.id);
+    const member =
+        (interaction.member as GuildMember) ||
+        (await interaction.guild!.members.fetch(interaction.user.id));
 
     if (!isStaff(member)) {
         await interaction.reply({ content: 'No tienes permiso.', ephemeral: true });
@@ -40,12 +42,6 @@ export const execute = async (interaction: ChatInputCommandInteraction, client: 
         .setTitle(mainTicketPanel.title)
         .setDescription(description)
         .setColor(mainTicketPanel.color);
-
-    if (interaction.guild) {
-        const responseTimeService = (await import('../services/responseTimeService.js')).default;
-        const estimate = await responseTimeService.getEstimatedWaitTime(interaction.guild);
-        embed.addFields({ name: '⏱️ Estimated Response Time', value: estimate, inline: false });
-    }
 
     if (mainTicketPanel.footerText) {
         embed.setFooter({
