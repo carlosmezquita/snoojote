@@ -1,69 +1,101 @@
 /**
- * Wait Time Estimator — Hybrid Median-and-Load Algorithm.
+ * Wait Time Estimator - per-staff, capacity-weighted model.
  *
- * Combines a recency-weighted median of recent response times, a temporal
- * median baseline for seasonality (day/time), and a load factor derived from
- * Little's Law to account for queue and staff availability.
- *
- * Formula:
- *   W_est = (α · M_recent + (1 - α) · H_{d,h}) × L(Q, S)
- *
- * Where:
- *   M_recent — Median response time of the last N answered tickets
- *   H_{d,h}  — Historical median for current day-of-week + 4-hour block
- *   α        — Recency weight (0.6 if recent data < 24h, 0.2 if stale)
- *   L(Q, S)  — Little's Law load factor: (Q + 1) / max(S, ε)
- *   Q        — Open tickets with no staff response yet
- *   S        — Active staff (online, dnd, or idle)
- *   ε        — 0.25 (prevents division by zero, models "waiting for login")
- *
- * All exported functions are pure (no side-effects, no DB access) so
- * they can be tested independently.
+ * The model anchors on global and temporal response history, then blends in
+ * the likely active responder pool when enough per-staff history exists.
  */
 
-// ---------------------------------------------------------------------------
-// Types
-// ---------------------------------------------------------------------------
+export const WAIT_ESTIMATOR_MODEL_VERSION = 'per-staff-capacity-v1';
 
 export interface TicketResponseData {
     createdAt: Date;
     firstResponseAt: Date;
+    staffCapacityAtCreation?: number | null;
+    openTicketsAtCreation?: number | null;
 }
 
-// ---------------------------------------------------------------------------
-// Constants
-// ---------------------------------------------------------------------------
+export type StaffStatus = 'online' | 'idle' | 'dnd' | 'busy' | 'offline' | 'invisible' | 'unknown';
 
-/** Recency weight when fresh data exists (most recent ticket < 24h old). */
+export interface StaffFirstResponseSample {
+    occurredAt: Date;
+    responseTimeMs: number;
+}
+
+export interface StaffResponseProfile {
+    staffId: string;
+    status: StaffStatus;
+    isBot?: boolean;
+    recentActivityCount?: number;
+    firstResponseSamples?: StaffFirstResponseSample[];
+}
+
+export interface ResponderPoolEntry {
+    staffId: string;
+    status: StaffStatus;
+    weight: number;
+    presenceWeight: number;
+    participationFactor: number;
+    baselineMs: number;
+    sampleCount: number;
+    usesStaffBaseline: boolean;
+}
+
+export interface EstimationInput {
+    /** Last answered tickets, ordered by createdAt DESC. */
+    recentTickets: TicketResponseData[];
+    /** Answered tickets matching current day-of-week + time block. */
+    temporalTickets: TicketResponseData[];
+    /** Answered tickets used as the global and historical-load fallback. */
+    allTickets: TicketResponseData[];
+    /** Currently active support staff profiles and history. */
+    staffProfiles?: StaffResponseProfile[];
+    /** Current timestamp. */
+    now: Date;
+    /** Number of open tickets with no first response before this ticket is added. */
+    queueLength: number;
+    /**
+     * Legacy count fallback. Used only when staffProfiles are unavailable.
+     * Prefer weighted capacity from staffProfiles.
+     */
+    activeStaff?: number;
+    /** Optional precomputed historical load median. */
+    historicalBaselineLoad?: number;
+}
+
+export interface EstimationFactors {
+    modelVersion: string;
+    globalTemporalBaseMs: number;
+    recentMedianMs: number | null;
+    temporalMedianMs: number | null;
+    globalMedianMs: number | null;
+    activeStaffBaseMs: number;
+    activeStaffBlendWeight: number;
+    blendedBaseMs: number;
+    currentStaffCapacity: number;
+    currentLoad: number;
+    historicalBaselineLoad: number;
+    loadMultiplier: number;
+    responderPool: ResponderPoolEntry[];
+}
+
+export interface EstimationResult {
+    estimatedMs: number;
+    factors: EstimationFactors;
+}
+
 const ALPHA_FRESH = 0.6;
-
-/** Recency weight when data is stale (most recent ticket ≥ 24h old). */
 const ALPHA_STALE = 0.2;
-
-/** Minimum active staff denominator — prevents division by zero and models
- *  the "waiting for someone to log in" delay (1 / 0.25 = 4× multiplier). */
 const EPSILON = 0.25;
-
-/** Fallback base time (ms) when no historical data exists at all. */
-const FALLBACK_BASE_MS = 15 * 60 * 1000; // 15 minutes
-
-/** Minimum number of time-block tickets before trusting H_{d,h}. */
+const FALLBACK_BASE_MS = 15 * 60 * 1000;
 const MIN_TEMPORAL_TICKETS = 5;
+const MIN_STAFF_SAMPLES = 5;
+const STAFF_HISTORY_WINDOW_DAYS = 90;
+const ACTIVE_STAFF_BLEND_MAX = 0.3;
+const MIN_ESTIMATE_MS = 60 * 1000;
+const MAX_ESTIMATE_MS = 24 * 60 * 60 * 1000;
+const MIN_LOAD_MULTIPLIER = 0.6;
+const MAX_LOAD_MULTIPLIER = 3.0;
 
-/** Minimum output clamp (ms). */
-const MIN_ESTIMATE_MS = 60 * 1000; // 1 minute
-
-/** Maximum output clamp (ms). */
-const MAX_ESTIMATE_MS = 24 * 60 * 60 * 1000; // 24 hours
-
-// ---------------------------------------------------------------------------
-// Pure helper functions
-// ---------------------------------------------------------------------------
-
-/**
- * Compute the median of an array of numbers.
- * Returns 0 for empty arrays. Does not mutate the input.
- */
 export function computeMedian(values: number[]): number {
     if (values.length === 0) return 0;
     const sorted = [...values].sort((a, b) => a - b);
@@ -72,35 +104,19 @@ export function computeMedian(values: number[]): number {
     return (sorted[mid - 1] + sorted[mid]) / 2;
 }
 
-/**
- * Map an hour (0–23) to a 4-hour time block (0–5).
- *   Block 0: 00:00–03:59
- *   Block 1: 04:00–07:59
- *   Block 2: 08:00–11:59
- *   Block 3: 12:00–15:59
- *   Block 4: 16:00–19:59
- *   Block 5: 20:00–23:59
- */
 export function getTimeBlock(hour: number): number {
     return Math.floor(hour / 4);
 }
 
-/**
- * Extract positive response times (firstResponseAt − createdAt) in ms.
- * Skips invalid / negative values.
- */
 export function extractResponseTimes(tickets: TicketResponseData[]): number[] {
     const times: number[] = [];
     for (const t of tickets) {
         const diff = t.firstResponseAt.getTime() - t.createdAt.getTime();
-        if (diff > 0) times.push(diff);
+        if (Number.isFinite(diff) && diff > 0) times.push(diff);
     }
     return times;
 }
 
-/**
- * Determine α based on whether the most recent ticket is within 24 hours.
- */
 export function computeAlpha(mostRecentCreatedAt: Date | null, now: Date): number {
     if (!mostRecentCreatedAt) return ALPHA_STALE;
     const ageMs = now.getTime() - mostRecentCreatedAt.getTime();
@@ -109,106 +125,162 @@ export function computeAlpha(mostRecentCreatedAt: Date | null, now: Date): numbe
 }
 
 /**
- * Little's Law load factor: L(Q, S) = (Q + 1) / max(S, ε).
+ * Current normalized queue load: (Q + 1) / max(S, 0.25).
  *
- * Q + 1 represents the new user's position in the unanswered queue.
- * When S = 0, the denominator is ε = 0.25, producing a 4× multiplier
- * per queued ticket — modelling the heavy delay of waiting for someone
- * to come online.
+ * Kept under the old name for compatibility with existing tests/callers.
  */
 export function computeLoadFactor(queueLength: number, activeStaff: number): number {
-    return (queueLength + 1) / Math.max(activeStaff, EPSILON);
+    return computeCurrentLoad(queueLength, activeStaff);
 }
 
-// ---------------------------------------------------------------------------
-// Main estimation
-// ---------------------------------------------------------------------------
-
-export interface EstimationInput {
-    /** Last N (up to 10) answered tickets, ordered by createdAt DESC. */
-    recentTickets: TicketResponseData[];
-    /** All answered tickets matching current day-of-week + time block (last 60 days). */
-    temporalTickets: TicketResponseData[];
-    /** All answered tickets (fallback for temporal baseline). */
-    allTickets: TicketResponseData[];
-    /** Current timestamp. */
-    now: Date;
-    /** Number of open tickets with no first response. */
-    queueLength: number;
-    /** Number of active staff (online / dnd / idle). */
-    activeStaff: number;
+export function computePresenceWeight(status: StaffStatus): number {
+    if (status === 'online') return 1;
+    if (status === 'idle') return 0.5;
+    if (status === 'dnd' || status === 'busy') return 0.25;
+    return 0;
 }
 
-/**
- * Estimate the wait time (in milliseconds) for a new ticket.
- *
- * Implements: W_est = (α · M_recent + (1 − α) · H_{d,h}) × L(Q, S)
- *
- * Returns the clamped estimate in milliseconds.
- */
-export function estimateWaitTimeMs(input: EstimationInput): number {
-    const { recentTickets, temporalTickets, allTickets, now, queueLength, activeStaff } = input;
+export function computeRecentParticipationFactor(recentActivityCount = 0): number {
+    return 1 + Math.min(Math.max(recentActivityCount, 0), 5) * 0.08;
+}
 
-    const loadFactor = computeLoadFactor(queueLength, activeStaff);
+export function computeWeightedStaffCapacity(staffProfiles: StaffResponseProfile[] = []): number {
+    return staffProfiles.reduce((total, staff) => {
+        if (staff.isBot) return total;
+        return total + computePresenceWeight(staff.status);
+    }, 0);
+}
 
-    // --- Zero-data fallback ---
-    const recentTimes = extractResponseTimes(recentTickets);
+export function computeWeightedMedian(entries: { value: number; weight: number }[]): number {
+    const validEntries = entries
+        .filter((entry) => entry.weight > 0 && Number.isFinite(entry.value))
+        .sort((a, b) => a.value - b.value);
+
+    if (validEntries.length === 0) return 0;
+
+    const totalWeight = validEntries.reduce((total, entry) => total + entry.weight, 0);
+    const midpoint = totalWeight / 2;
+    let running = 0;
+
+    for (const [index, entry] of validEntries.entries()) {
+        running += entry.weight;
+        if (running === midpoint && validEntries[index + 1]) {
+            return (entry.value + validEntries[index + 1].value) / 2;
+        }
+        if (running > midpoint) return entry.value;
+    }
+
+    return validEntries[validEntries.length - 1].value;
+}
+
+export function buildResponderPool(
+    staffProfiles: StaffResponseProfile[],
+    globalTemporalBaseMs: number,
+    now: Date,
+): ResponderPoolEntry[] {
+    return staffProfiles
+        .filter((staff) => !staff.isBot)
+        .map((staff) => {
+            const presenceWeight = computePresenceWeight(staff.status);
+            const participationFactor = computeRecentParticipationFactor(
+                staff.recentActivityCount ?? 0,
+            );
+            const responseTimes = getRecentStaffResponseTimes(staff, now);
+            const usesStaffBaseline = responseTimes.length >= MIN_STAFF_SAMPLES;
+
+            return {
+                staffId: staff.staffId,
+                status: staff.status,
+                weight: presenceWeight * participationFactor,
+                presenceWeight,
+                participationFactor,
+                baselineMs: usesStaffBaseline ? computeMedian(responseTimes) : globalTemporalBaseMs,
+                sampleCount: responseTimes.length,
+                usesStaffBaseline,
+            };
+        })
+        .filter((entry) => entry.weight > 0);
+}
+
+export function estimateWaitTime(input: EstimationInput): EstimationResult {
+    const { recentTickets, temporalTickets, allTickets, now, queueLength } = input;
+
+    const recentTimes = extractResponseTimes(recentTickets).slice(0, 20);
+    const temporalTimes = extractResponseTimes(temporalTickets);
     const allTimes = extractResponseTimes(allTickets);
 
-    if (recentTimes.length === 0 && allTimes.length === 0) {
-        return clamp(FALLBACK_BASE_MS * loadFactor);
-    }
+    const recentMedianMs = recentTimes.length > 0 ? computeMedian(recentTimes) : null;
+    const temporalMedianMs =
+        temporalTimes.length >= MIN_TEMPORAL_TICKETS ? computeMedian(temporalTimes) : null;
+    const globalMedianMs = allTimes.length > 0 ? computeMedian(allTimes) : null;
+    const globalTemporalBaseMs = computeGlobalTemporalBaseMs({
+        recentTickets,
+        recentMedianMs,
+        temporalMedianMs,
+        globalMedianMs,
+        now,
+    });
 
-    // --- M_recent (median of last N answered tickets) ---
-    const mRecent = recentTimes.length > 0 ? computeMedian(recentTimes) : null;
+    const staffProfiles = input.staffProfiles ?? [];
+    const responderPool = buildResponderPool(staffProfiles, globalTemporalBaseMs, now);
+    const activeStaffBaseMs =
+        responderPool.length > 0
+            ? computeWeightedMedian(
+                  responderPool.map((entry) => ({
+                      value: entry.baselineMs,
+                      weight: entry.weight,
+                  })),
+              )
+            : globalTemporalBaseMs;
 
-    // --- H_{d,h} (historical temporal baseline) ---
-    const temporalTimes = extractResponseTimes(temporalTickets);
-    let hDH: number | null = null;
+    const totalPoolWeight = responderPool.reduce((total, entry) => total + entry.weight, 0);
+    const reliablePoolWeight = responderPool
+        .filter((entry) => entry.usesStaffBaseline)
+        .reduce((total, entry) => total + entry.weight, 0);
+    const activeStaffBlendWeight =
+        totalPoolWeight > 0 ? ACTIVE_STAFF_BLEND_MAX * (reliablePoolWeight / totalPoolWeight) : 0;
+    const blendedBaseMs =
+        globalTemporalBaseMs * (1 - activeStaffBlendWeight) +
+        activeStaffBaseMs * activeStaffBlendWeight;
 
-    if (temporalTimes.length >= MIN_TEMPORAL_TICKETS) {
-        hDH = computeMedian(temporalTimes);
-    } else if (allTimes.length > 0) {
-        // Fallback: global historical median
-        hDH = computeMedian(allTimes);
-    }
+    const profileCapacity = computeWeightedStaffCapacity(staffProfiles);
+    const currentStaffCapacity =
+        staffProfiles.length > 0 ? profileCapacity : Math.max(input.activeStaff ?? 0, 0);
+    const currentLoad = computeCurrentLoad(queueLength, currentStaffCapacity);
+    const historicalBaselineLoad =
+        input.historicalBaselineLoad ?? computeHistoricalBaselineLoad(allTickets);
+    const loadMultiplier = clamp(
+        currentLoad / historicalBaselineLoad,
+        MIN_LOAD_MULTIPLIER,
+        MAX_LOAD_MULTIPLIER,
+    );
 
-    // --- Compute base time ---
-    let baseTime: number;
+    const estimatedMs = clampEstimate(blendedBaseMs * loadMultiplier);
 
-    if (mRecent !== null && hDH !== null) {
-        const alpha = computeAlpha(
-            recentTickets.length > 0 ? recentTickets[0].createdAt : null,
-            now,
-        );
-        baseTime = alpha * mRecent + (1 - alpha) * hDH;
-    } else if (mRecent !== null) {
-        baseTime = mRecent;
-    } else if (hDH !== null) {
-        baseTime = hDH;
-    } else {
-        baseTime = FALLBACK_BASE_MS;
-    }
-
-    // --- Apply load factor and clamp ---
-    return clamp(baseTime * loadFactor);
+    return {
+        estimatedMs,
+        factors: {
+            modelVersion: WAIT_ESTIMATOR_MODEL_VERSION,
+            globalTemporalBaseMs,
+            recentMedianMs,
+            temporalMedianMs,
+            globalMedianMs,
+            activeStaffBaseMs,
+            activeStaffBlendWeight,
+            blendedBaseMs,
+            currentStaffCapacity,
+            currentLoad,
+            historicalBaselineLoad,
+            loadMultiplier,
+            responderPool,
+        },
+    };
 }
 
-/**
- * Clamp the estimate to [1 minute, 24 hours].
- */
-function clamp(ms: number): number {
-    return Math.max(MIN_ESTIMATE_MS, Math.min(ms, MAX_ESTIMATE_MS));
+export function estimateWaitTimeMs(input: EstimationInput): number {
+    return estimateWaitTime(input).estimatedMs;
 }
 
-// ---------------------------------------------------------------------------
-// Formatting
-// ---------------------------------------------------------------------------
-
-/**
- * Human-readable duration string.
- * At the 24-hour cap, displays "24+ hours" to manage expectations.
- */
 export function formatDuration(ms: number): string {
     if (ms >= MAX_ESTIMATE_MS) {
         return '24+ hours';
@@ -228,4 +300,71 @@ export function formatDuration(ms: number): string {
     }
 
     return `${hours} hour${hours !== 1 ? 's' : ''} ${minutes} minute${minutes !== 1 ? 's' : ''}`;
+}
+
+function computeGlobalTemporalBaseMs(input: {
+    recentTickets: TicketResponseData[];
+    recentMedianMs: number | null;
+    temporalMedianMs: number | null;
+    globalMedianMs: number | null;
+    now: Date;
+}): number {
+    const fallbackBase = input.temporalMedianMs ?? input.globalMedianMs ?? FALLBACK_BASE_MS;
+
+    if (input.recentMedianMs !== null) {
+        const alpha = computeAlpha(
+            input.recentTickets.length > 0 ? input.recentTickets[0].createdAt : null,
+            input.now,
+        );
+        return alpha * input.recentMedianMs + (1 - alpha) * fallbackBase;
+    }
+
+    return fallbackBase;
+}
+
+function getRecentStaffResponseTimes(staff: StaffResponseProfile, now: Date): number[] {
+    const cutoff = now.getTime() - STAFF_HISTORY_WINDOW_DAYS * 24 * 60 * 60 * 1000;
+
+    return (staff.firstResponseSamples ?? [])
+        .filter(
+            (sample) =>
+                sample.occurredAt.getTime() >= cutoff &&
+                Number.isFinite(sample.responseTimeMs) &&
+                sample.responseTimeMs > 0,
+        )
+        .map((sample) => sample.responseTimeMs);
+}
+
+function computeCurrentLoad(queueLength: number, staffCapacity: number): number {
+    return (Math.max(queueLength, 0) + 1) / Math.max(staffCapacity, EPSILON);
+}
+
+function computeHistoricalBaselineLoad(tickets: TicketResponseData[]): number {
+    const loads = tickets
+        .map((ticket) => {
+            if (
+                ticket.openTicketsAtCreation == null ||
+                ticket.staffCapacityAtCreation == null ||
+                !Number.isFinite(ticket.openTicketsAtCreation) ||
+                !Number.isFinite(ticket.staffCapacityAtCreation)
+            ) {
+                return null;
+            }
+
+            return (
+                (Math.max(ticket.openTicketsAtCreation, 0) + 1) /
+                Math.max(ticket.staffCapacityAtCreation, EPSILON)
+            );
+        })
+        .filter((value): value is number => value != null && Number.isFinite(value) && value > 0);
+
+    return loads.length > 0 ? computeMedian(loads) : 1;
+}
+
+function clampEstimate(ms: number): number {
+    return clamp(ms, MIN_ESTIMATE_MS, MAX_ESTIMATE_MS);
+}
+
+function clamp(ms: number, min: number, max: number): number {
+    return Math.max(min, Math.min(ms, max));
 }

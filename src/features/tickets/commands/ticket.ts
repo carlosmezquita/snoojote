@@ -8,6 +8,8 @@ import {
 import { type DiscordBot } from '../../../core/client.js';
 import { config } from '../../../config.js';
 import ticketService from '../services/ticketService.js';
+import responseTimeService from '../services/responseTimeService.js';
+import { formatDuration } from '../services/waitTimeEstimator.js';
 
 export const data = new SlashCommandBuilder()
     .setName('ticket')
@@ -35,6 +37,11 @@ export const data = new SlashCommandBuilder()
     )
     .addSubcommand((subcommand) =>
         subcommand.setName('delete').setDescription('Elimina el canal del ticket actual.'),
+    )
+    .addSubcommand((subcommand) =>
+        subcommand
+            .setName('waitdebug')
+            .setDescription('Muestra factores internos del estimador de espera.'),
     )
     .addSubcommand((subcommand) =>
         subcommand
@@ -77,11 +84,20 @@ export const execute = async (interaction: ChatInputCommandInteraction, client: 
 
     const subcommand = interaction.options.getSubcommand();
     const isManager = canManageTickets(member);
+    const isAdmin = member.permissions.has(PermissionFlagsBits.Administrator);
     const isOwner = ticket.userId === interaction.user.id;
 
     if (subcommand === 'close' && !isManager && !isOwner) {
         await interaction.reply({
             content: 'No tienes permiso para cerrar este ticket.',
+            ephemeral: true,
+        });
+        return;
+    }
+
+    if (subcommand === 'waitdebug' && !isAdmin) {
+        await interaction.reply({
+            content: 'Solo administradores pueden consultar datos internos del estimador.',
             ephemeral: true,
         });
         return;
@@ -126,6 +142,37 @@ export const execute = async (interaction: ChatInputCommandInteraction, client: 
         if (subcommand === 'delete') {
             await ticketService.deleteTicket(channel, interaction.user);
             await interaction.editReply('Ticket marcado para eliminación.');
+            return;
+        }
+
+        if (subcommand === 'waitdebug') {
+            const debug = await responseTimeService.getWaitEstimateDebug(interaction.guild!);
+            const pool = debug.estimate.factors.responderPool;
+            await interaction.editReply(
+                [
+                    `Modelo: ${debug.estimate.factors.modelVersion}`,
+                    `Estimado final: ${formatDuration(debug.estimate.estimatedMs)} (${Math.round(
+                        debug.estimate.estimatedMs,
+                    )}ms)`,
+                    `Capacidad ponderada: ${debug.weightedStaffCapacity.toFixed(2)}`,
+                    `Estados: online ${debug.statusBreakdown.online}, idle ${debug.statusBreakdown.idle}, dnd ${debug.statusBreakdown.dnd}, offline ${debug.statusBreakdown.offline}, unknown ${debug.statusBreakdown.unknown}`,
+                    `Base global/temporal: ${Math.round(debug.estimate.factors.globalTemporalBaseMs)}ms`,
+                    `Base staff activo: ${Math.round(debug.estimate.factors.activeStaffBaseMs)}ms`,
+                    `Multiplicador carga: ${debug.estimate.factors.loadMultiplier.toFixed(2)}x`,
+                    `Staff en pool: ${
+                        pool.length > 0
+                            ? pool
+                                  .map(
+                                      (entry) =>
+                                          `${entry.staffId}:${entry.status}:w${entry.weight.toFixed(
+                                              2,
+                                          )}:n${entry.sampleCount}`,
+                                  )
+                                  .join(', ')
+                            : 'none'
+                    }`,
+                ].join('\n'),
+            );
             return;
         }
 
