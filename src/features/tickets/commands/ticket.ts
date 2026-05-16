@@ -61,7 +61,71 @@ export const data = new SlashCommandBuilder()
     );
 
 export const execute = async (interaction: ChatInputCommandInteraction, client: DiscordBot) => {
-    if (!interaction.inGuild() || !interaction.channel || !interaction.channel.isTextBased()) {
+    if (!interaction.inGuild()) {
+        await interaction.reply({
+            content: 'Este comando solo puede usarse dentro del servidor.',
+            ephemeral: true,
+        });
+        return;
+    }
+
+    const member = await getGuildMember(interaction);
+    if (!member) {
+        await interaction.reply({ content: 'No pude verificar tus permisos.', ephemeral: true });
+        return;
+    }
+
+    const subcommand = interaction.options.getSubcommand();
+    const isManager = canManageTickets(member);
+    const isAdmin = member.permissions.has(PermissionFlagsBits.Administrator);
+
+    if (subcommand === 'waitdebug' && !isAdmin) {
+        await interaction.reply({
+            content: 'Solo administradores pueden consultar datos internos del estimador.',
+            ephemeral: true,
+        });
+        return;
+    }
+
+    if (subcommand === 'waitdebug') {
+        await interaction.deferReply({ ephemeral: true });
+
+        try {
+            const debug = await responseTimeService.getWaitEstimateDebug(interaction.guild!);
+            const pool = debug.estimate.factors.responderPool;
+            await interaction.editReply(
+                [
+                    `Modelo: ${debug.estimate.factors.modelVersion}`,
+                    `Estimado final: ${formatDuration(debug.estimate.estimatedMs)} (${Math.round(
+                        debug.estimate.estimatedMs,
+                    )}ms)`,
+                    `Capacidad ponderada: ${debug.weightedStaffCapacity.toFixed(2)}`,
+                    `Estados: online ${debug.statusBreakdown.online}, idle ${debug.statusBreakdown.idle}, dnd ${debug.statusBreakdown.dnd}, offline ${debug.statusBreakdown.offline}, unknown ${debug.statusBreakdown.unknown}`,
+                    `Base global/temporal: ${Math.round(debug.estimate.factors.globalTemporalBaseMs)}ms`,
+                    `Base staff activo: ${Math.round(debug.estimate.factors.activeStaffBaseMs)}ms`,
+                    `Multiplicador carga: ${debug.estimate.factors.loadMultiplier.toFixed(2)}x`,
+                    `Staff en pool: ${
+                        pool.length > 0
+                            ? pool
+                                  .map(
+                                      (entry) =>
+                                          `${entry.staffId}:${entry.status}:w${entry.weight.toFixed(
+                                              2,
+                                          )}:n${entry.sampleCount}`,
+                                  )
+                                  .join(', ')
+                            : 'none'
+                    }`,
+                ].join('\n'),
+            );
+        } catch (error) {
+            client.logger.error(`Ticket waitdebug command error: ${error}`);
+            await interaction.editReply('No se pudo consultar el estimador.');
+        }
+        return;
+    }
+
+    if (!interaction.channel || !interaction.channel.isTextBased()) {
         await interaction.reply({
             content: 'Este comando solo puede usarse dentro de un ticket.',
             ephemeral: true,
@@ -76,28 +140,11 @@ export const execute = async (interaction: ChatInputCommandInteraction, client: 
         return;
     }
 
-    const member = await getGuildMember(interaction);
-    if (!member) {
-        await interaction.reply({ content: 'No pude verificar tus permisos.', ephemeral: true });
-        return;
-    }
-
-    const subcommand = interaction.options.getSubcommand();
-    const isManager = canManageTickets(member);
-    const isAdmin = member.permissions.has(PermissionFlagsBits.Administrator);
     const isOwner = ticket.userId === interaction.user.id;
 
     if (subcommand === 'close' && !isManager && !isOwner) {
         await interaction.reply({
             content: 'No tienes permiso para cerrar este ticket.',
-            ephemeral: true,
-        });
-        return;
-    }
-
-    if (subcommand === 'waitdebug' && !isAdmin) {
-        await interaction.reply({
-            content: 'Solo administradores pueden consultar datos internos del estimador.',
             ephemeral: true,
         });
         return;
@@ -142,37 +189,6 @@ export const execute = async (interaction: ChatInputCommandInteraction, client: 
         if (subcommand === 'delete') {
             await ticketService.deleteTicket(channel, interaction.user);
             await interaction.editReply('Ticket marcado para eliminación.');
-            return;
-        }
-
-        if (subcommand === 'waitdebug') {
-            const debug = await responseTimeService.getWaitEstimateDebug(interaction.guild!);
-            const pool = debug.estimate.factors.responderPool;
-            await interaction.editReply(
-                [
-                    `Modelo: ${debug.estimate.factors.modelVersion}`,
-                    `Estimado final: ${formatDuration(debug.estimate.estimatedMs)} (${Math.round(
-                        debug.estimate.estimatedMs,
-                    )}ms)`,
-                    `Capacidad ponderada: ${debug.weightedStaffCapacity.toFixed(2)}`,
-                    `Estados: online ${debug.statusBreakdown.online}, idle ${debug.statusBreakdown.idle}, dnd ${debug.statusBreakdown.dnd}, offline ${debug.statusBreakdown.offline}, unknown ${debug.statusBreakdown.unknown}`,
-                    `Base global/temporal: ${Math.round(debug.estimate.factors.globalTemporalBaseMs)}ms`,
-                    `Base staff activo: ${Math.round(debug.estimate.factors.activeStaffBaseMs)}ms`,
-                    `Multiplicador carga: ${debug.estimate.factors.loadMultiplier.toFixed(2)}x`,
-                    `Staff en pool: ${
-                        pool.length > 0
-                            ? pool
-                                  .map(
-                                      (entry) =>
-                                          `${entry.staffId}:${entry.status}:w${entry.weight.toFixed(
-                                              2,
-                                          )}:n${entry.sampleCount}`,
-                                  )
-                                  .join(', ')
-                            : 'none'
-                    }`,
-                ].join('\n'),
-            );
             return;
         }
 
