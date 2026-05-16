@@ -1,7 +1,7 @@
 {
     "version": "6",
     "dialect": "sqlite",
-    "id": "cf641865-b27c-4a92-b361-a04101e35868",
+    "id": "5b504e59-d65c-4bf8-8dae-5fea1af2b50b",
     "prevId": "300f2d01-fed3-49e0-bc52-54853faff045",
     "tables": {
         "daily_word_cache": {
@@ -539,6 +539,13 @@
                     "type": "text",
                     "primaryKey": false,
                     "notNull": true,
+                    "autoincrement": false
+                },
+                "option_id": {
+                    "name": "option_id",
+                    "type": "text",
+                    "primaryKey": false,
+                    "notNull": false,
                     "autoincrement": false
                 },
                 "status": {

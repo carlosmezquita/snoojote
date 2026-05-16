@@ -7,6 +7,7 @@ export const tickets = sqliteTable(
         id: integer('id').primaryKey({ autoIncrement: true }),
         channelId: text('channel_id').notNull(),
         userId: text('user_id').notNull(),
+        optionId: text('option_id'),
         status: text('status').default('open').notNull(),
         createdAt: integer('created_at', { mode: 'timestamp' })
             .default(sql`(unixepoch())`)

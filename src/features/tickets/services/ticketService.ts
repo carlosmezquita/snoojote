@@ -107,6 +107,7 @@ export class TicketService {
                 .values({
                     channelId: channel.id,
                     userId: user.id,
+                    optionId: option.id,
                     status: 'open',
                     createdAt: new Date(),
                     staffOnlineAtCreation,

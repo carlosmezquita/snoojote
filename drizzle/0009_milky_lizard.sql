@@ -22,5 +22,6 @@ CREATE TABLE `ticket_wait_estimate_snapshots` (
 );
 --> statement-breakpoint
 CREATE INDEX `ticket_wait_estimate_snapshots_ticket_created_at_idx` ON `ticket_wait_estimate_snapshots` (`ticket_id`,`created_at`);--> statement-breakpoint
+ALTER TABLE `tickets` ADD `option_id` text;--> statement-breakpoint
 ALTER TABLE `tickets` ADD `first_response_by` text;--> statement-breakpoint
 ALTER TABLE `tickets` ADD `staff_capacity_at_creation` real;
