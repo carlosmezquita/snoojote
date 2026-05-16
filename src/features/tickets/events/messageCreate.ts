@@ -34,7 +34,12 @@ export default {
 
             if (ticket) {
                 // It is an open ticket and message is from support staff
-                await responseTimeService.recordResponse(ticket.id, message.createdAt);
+                await responseTimeService.recordResponse(
+                    ticket.id,
+                    message.author.id,
+                    message.createdAt,
+                    message.id,
+                );
             }
         } catch (error) {
             client.logger.error(`Error in messageCreate ticket handler: ${error}`);

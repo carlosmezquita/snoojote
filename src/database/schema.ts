@@ -1,4 +1,4 @@
-import { sqliteTable, integer, text, index, uniqueIndex } from 'drizzle-orm/sqlite-core';
+import { sqliteTable, integer, text, index, uniqueIndex, real } from 'drizzle-orm/sqlite-core';
 import { sql } from 'drizzle-orm';
 
 export const tickets = sqliteTable(
@@ -12,12 +12,14 @@ export const tickets = sqliteTable(
             .default(sql`(unixepoch())`)
             .notNull(),
         firstResponseAt: integer('first_response_at', { mode: 'timestamp' }),
+        firstResponseBy: text('first_response_by'),
         closedAt: integer('closed_at', { mode: 'timestamp' }),
         closedBy: text('closed_by'),
         closeReason: text('close_reason'),
         deletedAt: integer('deleted_at', { mode: 'timestamp' }),
         claimedBy: text('claimed_by'),
         staffOnlineAtCreation: integer('staff_online_at_creation'),
+        staffCapacityAtCreation: real('staff_capacity_at_creation'),
         openTicketsAtCreation: integer('open_tickets_at_creation'),
     },
     (table) => ({
@@ -25,6 +27,55 @@ export const tickets = sqliteTable(
         channelIdIdx: index('tickets_channel_id_idx').on(table.channelId),
         // Optimizes finding open tickets for a user
         userStatusIdx: index('tickets_user_status_idx').on(table.userId, table.status),
+    }),
+);
+
+export const ticketStaffActivity = sqliteTable(
+    'ticket_staff_activity',
+    {
+        id: integer('id').primaryKey({ autoIncrement: true }),
+        ticketId: integer('ticket_id')
+            .references(() => tickets.id, { onDelete: 'cascade' })
+            .notNull(),
+        staffId: text('staff_id').notNull(),
+        action: text('action').notNull(),
+        messageId: text('message_id'),
+        occurredAt: integer('occurred_at', { mode: 'timestamp' })
+            .default(sql`(unixepoch())`)
+            .notNull(),
+        responseTimeMs: integer('response_time_ms'),
+    },
+    (table) => ({
+        ticketOccurredAtIdx: index('ticket_staff_activity_ticket_occurred_at_idx').on(
+            table.ticketId,
+            table.occurredAt,
+        ),
+        staffOccurredAtIdx: index('ticket_staff_activity_staff_occurred_at_idx').on(
+            table.staffId,
+            table.occurredAt,
+        ),
+    }),
+);
+
+export const ticketWaitEstimateSnapshots = sqliteTable(
+    'ticket_wait_estimate_snapshots',
+    {
+        id: integer('id').primaryKey({ autoIncrement: true }),
+        ticketId: integer('ticket_id')
+            .references(() => tickets.id, { onDelete: 'cascade' })
+            .notNull(),
+        modelVersion: text('model_version').notNull(),
+        estimatedMs: integer('estimated_ms').notNull(),
+        factorDetails: text('factor_details', { mode: 'json' }).notNull(),
+        createdAt: integer('created_at', { mode: 'timestamp' })
+            .default(sql`(unixepoch())`)
+            .notNull(),
+    },
+    (table) => ({
+        ticketCreatedAtIdx: index('ticket_wait_estimate_snapshots_ticket_created_at_idx').on(
+            table.ticketId,
+            table.createdAt,
+        ),
     }),
 );
 

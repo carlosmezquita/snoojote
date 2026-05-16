@@ -18,6 +18,7 @@ import { createEmbed, Colors } from '../../../shared/utils/embeds.js';
 import { DMService, DMType } from '../../../shared/services/DMService.js';
 import { type TicketOptionConfig } from '../config/TicketConfig.js';
 import logger from '../../../utils/logger.js';
+import { formatDuration } from './waitTimeEstimator.js';
 
 type TicketRecord = typeof tickets.$inferSelect;
 
@@ -92,26 +93,42 @@ export class TicketService {
 
             const responseTimeService = (await import('./responseTimeService.js')).default;
             const staffOnlineAtCreation = await responseTimeService.getActiveStaffCount(guild);
+            const staffCapacityAtCreation =
+                await responseTimeService.getWeightedStaffCapacity(guild);
             const openTicketsAtCreation = await responseTimeService.getOpenTicketCount();
+            const unansweredQueueLength = await responseTimeService.getUnansweredQueueLength();
+            const estimateResult = await responseTimeService.createEstimate(
+                guild,
+                unansweredQueueLength,
+            );
 
-            await db.insert(tickets).values({
-                channelId: channel.id,
-                userId: user.id,
-                status: 'open',
-                createdAt: new Date(),
-                staffOnlineAtCreation,
-                openTicketsAtCreation,
-            });
+            const insertedTicket = await db
+                .insert(tickets)
+                .values({
+                    channelId: channel.id,
+                    userId: user.id,
+                    status: 'open',
+                    createdAt: new Date(),
+                    staffOnlineAtCreation,
+                    staffCapacityAtCreation,
+                    openTicketsAtCreation,
+                })
+                .returning({ id: tickets.id })
+                .get();
+
+            await responseTimeService.recordEstimateSnapshot(insertedTicket.id, estimateResult);
             logger.info('Ticket channel created', {
                 userId: user.id,
                 guildId: guild.id,
                 channelId: channel.id,
                 optionId: option.id,
                 staffOnlineAtCreation,
+                staffCapacityAtCreation,
                 openTicketsAtCreation,
+                estimatedWaitMs: estimateResult.estimatedMs,
             });
 
-            const estimate = await responseTimeService.getEstimatedWaitTime(guild);
+            const estimate = formatDuration(estimateResult.estimatedMs);
 
             const embed = createEmbed(
                 option.openMessage || `Ticket de ${user.username}`,
