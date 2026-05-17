@@ -8,6 +8,7 @@ import moderationService from '../../../shared/services/ModerationService.js';
 import logger from '../../../utils/logger.js';
 
 const COOLDOWN_SECS = 60;
+const LINKS_LIMIT = 1;
 const WARNS_LIMIT = 3;
 const SEND_ALERT = true;
 
@@ -46,14 +47,17 @@ function shouldIgnoreMessage(message: Message): boolean {
 
 async function handleSpam(message: Message, client: DiscordBot) {
     const currentCount = rateLimiter.check(message.author.id);
+    const decision = getLinkRateLimitDecision(currentCount);
+    if (!decision.shouldDelete) return;
+
     const alertsChannel = client.channels.cache.get(config.channels.alerts) as TextChannel;
 
-    if (currentCount < WARNS_LIMIT) {
-        await sendWarning(message, currentCount);
+    if (decision.violationCount < WARNS_LIMIT) {
+        await sendWarning(message, decision.violationCount);
     }
 
     if (SEND_ALERT && alertsChannel) {
-        await sendAlertLog(message, alertsChannel, currentCount);
+        await sendAlertLog(message, alertsChannel, decision.violationCount);
     }
 
     await message.delete().catch((error) => {
@@ -65,18 +69,32 @@ async function handleSpam(message: Message, client: DiscordBot) {
         });
     });
 
-    if (currentCount >= WARNS_LIMIT) {
+    if (decision.shouldBan) {
         await banUser(message, alertsChannel);
     }
 }
 
-async function sendWarning(message: Message, currentCount: number) {
+export function getLinkRateLimitDecision(currentCount: number): {
+    shouldDelete: boolean;
+    shouldBan: boolean;
+    violationCount: number;
+} {
+    const violationCount = Math.max(currentCount - LINKS_LIMIT, 0);
+
+    return {
+        shouldDelete: violationCount > 0,
+        shouldBan: violationCount >= WARNS_LIMIT,
+        violationCount,
+    };
+}
+
+async function sendWarning(message: Message, violationCount: number) {
     try {
         await message.author.send({
             embeds: [
                 createWarningEmbed(
                     ':warning: ATENCIÓN',
-                    `Has excedido el límite de envío de enlaces (1/${COOLDOWN_SECS}s). Por favor, espera.\n\nAvisos: ${currentCount}/${WARNS_LIMIT}`,
+                    `Has excedido el límite de envío de enlaces (${LINKS_LIMIT}/${COOLDOWN_SECS}s). Por favor, espera.\n\nAvisos: ${violationCount}/${WARNS_LIMIT}`,
                 ),
             ],
         });
@@ -89,7 +107,7 @@ async function sendWarning(message: Message, currentCount: number) {
     }
 }
 
-async function sendAlertLog(message: Message, channel: TextChannel, currentCount: number) {
+async function sendAlertLog(message: Message, channel: TextChannel, violationCount: number) {
     await channel.send({
         embeds: [
             createErrorEmbed(
@@ -97,7 +115,7 @@ async function sendAlertLog(message: Message, channel: TextChannel, currentCount
                 `El usuario ha superado la tasa permitida de envío de enlaces`,
             ).addFields(
                 { name: 'Autor', value: message.author.toString(), inline: true },
-                { name: `Avisos`, value: `${currentCount}/${WARNS_LIMIT}`, inline: true },
+                { name: `Avisos`, value: `${violationCount}/${WARNS_LIMIT}`, inline: true },
                 { name: 'Canal', value: message.channel.toString(), inline: true },
                 { name: 'Mensaje', value: message.content, inline: false },
             ),
