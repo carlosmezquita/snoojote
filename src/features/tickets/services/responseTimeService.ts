@@ -242,11 +242,18 @@ export class ResponseTimeService {
      * Calculates the estimated wait time for a new ticket using the per-staff,
      * capacity-weighted model.
      */
-    async getEstimatedWaitTime(guild: Guild): Promise<string> {
-        return formatDuration((await this.createEstimate(guild)).estimatedMs);
+    async getEstimatedWaitTime(
+        guild: Guild,
+        options: { forceRefresh?: boolean } = {},
+    ): Promise<string> {
+        return formatDuration((await this.createEstimate(guild, undefined, options)).estimatedMs);
     }
 
-    async createEstimate(guild: Guild, queueLengthOverride?: number): Promise<EstimationResult> {
+    async createEstimate(
+        guild: Guild,
+        queueLengthOverride?: number,
+        options: { forceRefresh?: boolean } = {},
+    ): Promise<EstimationResult> {
         const now = new Date();
 
         // Recent baseline: last 20 answered tickets.
@@ -333,7 +340,7 @@ export class ResponseTimeService {
             }));
 
         const queueLength = queueLengthOverride ?? (await this.getUnansweredQueueLength());
-        const staffCapacity = await this.getStaffCapacity(guild);
+        const staffCapacity = await this.getStaffCapacity(guild, options);
         const staffProfiles = await this.enrichStaffProfiles(staffCapacity.staffProfiles, now);
 
         const estimate = estimateWaitTime({

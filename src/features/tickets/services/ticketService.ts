@@ -92,9 +92,11 @@ export class TicketService {
             });
 
             const responseTimeService = (await import('./responseTimeService.js')).default;
-            const staffOnlineAtCreation = await responseTimeService.getActiveStaffCount(guild);
-            const staffCapacityAtCreation =
-                await responseTimeService.getWeightedStaffCapacity(guild);
+            const staffCapacity = await responseTimeService.getStaffCapacity(guild, {
+                forceRefresh: true,
+            });
+            const staffOnlineAtCreation = staffCapacity.activeCount;
+            const staffCapacityAtCreation = staffCapacity.weightedCapacity;
             const openTicketsAtCreation = await responseTimeService.getOpenTicketCount();
             const unansweredQueueLength = await responseTimeService.getUnansweredQueueLength();
             const estimateResult = await responseTimeService.createEstimate(
