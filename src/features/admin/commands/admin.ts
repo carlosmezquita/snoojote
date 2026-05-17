@@ -155,6 +155,12 @@ async function handleTicketAvailability(
             availability.missingRoleIds.length > 0
                 ? availability.missingRoleIds.map((roleId) => `\`${roleId}\``).join(', ')
                 : 'None';
+        const staffList =
+            availability.staffProfiles.length > 0
+                ? availability.staffProfiles
+                      .map((staff) => `<@${staff.staffId}>: ${staff.status}`)
+                      .join('\n')
+                : 'None';
 
         const embed = new EmbedBuilder()
             .setTitle('Ticket Availability Debug')
@@ -182,7 +188,13 @@ async function handleTicketAvailability(
                         `Idle: ${statuses.idle}`,
                         `DND: ${statuses.dnd}`,
                         `Offline/Invisible: ${statuses.offline}`,
+                        `Unknown: ${statuses.unknown}`,
                     ].join('\n'),
+                    inline: false,
+                },
+                {
+                    name: 'Staff detected',
+                    value: truncateEmbedField(staffList),
                     inline: false,
                 },
                 {
@@ -244,4 +256,10 @@ async function rejectInvalidEconomyTarget(
     }
 
     return false;
+}
+
+function truncateEmbedField(value: string): string {
+    const maxLength = 1024;
+    if (value.length <= maxLength) return value;
+    return `${value.slice(0, maxLength - 20)}\n...truncated`;
 }

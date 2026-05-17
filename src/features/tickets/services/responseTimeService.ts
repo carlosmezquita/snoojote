@@ -39,6 +39,7 @@ interface StaffAvailabilitySnapshot {
     activeCount: number;
     totalStaffCount: number;
     activeByStatus: Record<StaffStatus, number>;
+    staffProfiles: StaffResponseProfile[];
     missingRoleIds: string[];
     fetchedAt: number;
     fromCache: boolean;
@@ -54,7 +55,7 @@ interface HistoricalLoadCacheEntry {
     fetchedAt: number;
 }
 
-const STAFF_CACHE_TTL_MS = 5 * 60 * 1000; // 5 minutes
+const STAFF_CACHE_TTL_MS = 30 * 1000;
 const PROFILE_CACHE_TTL_MS = 5 * 60 * 1000;
 const HISTORICAL_LOAD_CACHE_TTL_MS = 5 * 60 * 1000;
 const EPSILON_STAFF_CAPACITY = 0.25;
@@ -134,6 +135,7 @@ export class ResponseTimeService {
             activeCount: capacity.activeCount,
             totalStaffCount: capacity.staffProfiles.length,
             activeByStatus: capacity.statusBreakdown,
+            staffProfiles: capacity.staffProfiles,
             missingRoleIds: capacity.missingRoleIds,
             fetchedAt: capacity.fetchedAt,
             fromCache: capacity.fromCache,
@@ -374,16 +376,25 @@ export class ResponseTimeService {
         });
     }
 
-    async getWaitEstimateDebug(guild: Guild): Promise<{
+    async getWaitEstimateDebug(
+        guild: Guild,
+        options: { forceRefresh?: boolean } = {},
+    ): Promise<{
         estimate: EstimationResult;
         statusBreakdown: Record<StaffStatus, number>;
+        staffProfiles: StaffResponseProfile[];
+        missingRoleIds: string[];
         weightedStaffCapacity: number;
+        fromCache: boolean;
     }> {
-        const staffCapacity = await this.getStaffCapacity(guild);
+        const staffCapacity = await this.getStaffCapacity(guild, options);
         return {
             estimate: await this.createEstimate(guild),
             statusBreakdown: staffCapacity.statusBreakdown,
+            staffProfiles: staffCapacity.staffProfiles,
+            missingRoleIds: staffCapacity.missingRoleIds,
             weightedStaffCapacity: staffCapacity.weightedCapacity,
+            fromCache: staffCapacity.fromCache,
         };
     }
 

@@ -91,33 +91,54 @@ export const execute = async (interaction: ChatInputCommandInteraction, client: 
         await interaction.deferReply({ ephemeral: true });
 
         try {
-            const debug = await responseTimeService.getWaitEstimateDebug(interaction.guild!);
+            const debug = await responseTimeService.getWaitEstimateDebug(interaction.guild!, {
+                forceRefresh: true,
+            });
             const pool = debug.estimate.factors.responderPool;
-            await interaction.editReply(
-                [
-                    `Modelo: ${debug.estimate.factors.modelVersion}`,
-                    `Estimado final: ${formatDuration(debug.estimate.estimatedMs)} (${Math.round(
-                        debug.estimate.estimatedMs,
-                    )}ms)`,
-                    `Capacidad ponderada: ${debug.weightedStaffCapacity.toFixed(2)}`,
-                    `Estados: online ${debug.statusBreakdown.online}, idle ${debug.statusBreakdown.idle}, dnd ${debug.statusBreakdown.dnd}, offline ${debug.statusBreakdown.offline}, unknown ${debug.statusBreakdown.unknown}`,
-                    `Base global/temporal: ${Math.round(debug.estimate.factors.globalTemporalBaseMs)}ms`,
-                    `Base staff activo: ${Math.round(debug.estimate.factors.activeStaffBaseMs)}ms`,
-                    `Multiplicador carga: ${debug.estimate.factors.loadMultiplier.toFixed(2)}x`,
-                    `Staff en pool: ${
-                        pool.length > 0
-                            ? pool
-                                  .map(
-                                      (entry) =>
-                                          `${entry.staffId}:${entry.status}:w${entry.weight.toFixed(
-                                              2,
-                                          )}:n${entry.sampleCount}`,
-                                  )
-                                  .join(', ')
-                            : 'none'
-                    }`,
-                ].join('\n'),
-            );
+            const staffAvailability =
+                debug.staffProfiles.length > 0
+                    ? debug.staffProfiles
+                          .map((staff) => {
+                              const weight = pool.find(
+                                  (entry) => entry.staffId === staff.staffId,
+                              )?.weight;
+                              return `<@${staff.staffId}>:${staff.status}${
+                                  weight != null ? `:w${weight.toFixed(2)}` : ':not-in-pool'
+                              }`;
+                          })
+                          .join(', ')
+                    : 'none';
+            const missingRoles =
+                debug.missingRoleIds.length > 0 ? debug.missingRoleIds.join(', ') : 'none';
+
+            const debugLines = [
+                `Modelo: ${debug.estimate.factors.modelVersion}`,
+                `Estimado final: ${formatDuration(debug.estimate.estimatedMs)} (${Math.round(
+                    debug.estimate.estimatedMs,
+                )}ms)`,
+                `Capacidad ponderada: ${debug.weightedStaffCapacity.toFixed(2)}`,
+                `Cache staff: ${debug.fromCache ? 'yes' : 'no'} (force refresh)`,
+                `Estados: online ${debug.statusBreakdown.online}, idle ${debug.statusBreakdown.idle}, dnd ${debug.statusBreakdown.dnd}, offline ${debug.statusBreakdown.offline}, unknown ${debug.statusBreakdown.unknown}`,
+                `Roles staff no encontrados: ${missingRoles}`,
+                `Staff detectado: ${staffAvailability}`,
+                `Base global/temporal: ${Math.round(debug.estimate.factors.globalTemporalBaseMs)}ms`,
+                `Base staff activo: ${Math.round(debug.estimate.factors.activeStaffBaseMs)}ms`,
+                `Multiplicador carga: ${debug.estimate.factors.loadMultiplier.toFixed(2)}x`,
+                `Pool ponderado usado por estimador: ${
+                    pool.length > 0
+                        ? pool
+                              .map(
+                                  (entry) =>
+                                      `${entry.staffId}:${entry.status}:w${entry.weight.toFixed(
+                                          2,
+                                      )}:n${entry.sampleCount}`,
+                              )
+                              .join(', ')
+                        : 'none'
+                }`,
+            ];
+
+            await interaction.editReply(truncateDiscordMessage(debugLines.join('\n')));
         } catch (error) {
             client.logger.error(`Ticket waitdebug command error: ${error}`);
             await interaction.editReply('No se pudo consultar el estimador.');
@@ -215,4 +236,10 @@ async function getGuildMember(
 ): Promise<GuildMember | null> {
     if (interaction.member instanceof GuildMember) return interaction.member;
     return (await interaction.guild?.members.fetch(interaction.user.id).catch(() => null)) ?? null;
+}
+
+function truncateDiscordMessage(message: string): string {
+    const maxLength = 1900;
+    if (message.length <= maxLength) return message;
+    return `${message.slice(0, maxLength - 20)}\n...truncated`;
 }
