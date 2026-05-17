@@ -6,7 +6,6 @@ import {
     type Interaction,
     type ModalActionRowComponentBuilder,
     ModalBuilder,
-    PermissionFlagsBits,
     type TextChannel,
     TextInputBuilder,
     TextInputStyle,
@@ -15,6 +14,7 @@ import { type DiscordBot } from '../../../core/client.js';
 import { config } from '../../../config.js';
 import ticketService from '../services/ticketService.js';
 import { ticketOptions } from '../config/options/index.js';
+import { isTicketStaff } from '../utils/ticketStaff.js';
 
 export const name = Events.InteractionCreate;
 export const once = false;
@@ -37,7 +37,7 @@ export const execute = async (interaction: Interaction, client: DiscordBot) => {
             }
 
             const member = await getGuildMember(interaction);
-            if (!member || (!canManageTickets(member) && ticket.userId !== interaction.user.id)) {
+            if (!member || (!isTicketStaff(member) && ticket.userId !== interaction.user.id)) {
                 await interaction.reply({
                     content: 'No tienes permiso para cerrar este ticket.',
                     ephemeral: true,
@@ -53,7 +53,7 @@ export const execute = async (interaction: Interaction, client: DiscordBot) => {
             if (!interaction.channel || !interaction.channel.isTextBased()) return;
 
             const member = await getGuildMember(interaction);
-            if (!member || !canManageTickets(member)) {
+            if (!member || !isTicketStaff(member)) {
                 await interaction.reply({
                     content: 'No tienes permiso para gestionar este ticket.',
                     ephemeral: true,
@@ -220,12 +220,4 @@ async function getGuildMember(interaction: Interaction): Promise<GuildMember | n
     if (!interaction.guild) return null;
     if (interaction.member instanceof GuildMember) return interaction.member;
     return await interaction.guild.members.fetch(interaction.user.id).catch(() => null);
-}
-
-function canManageTickets(member: GuildMember): boolean {
-    return (
-        member.permissions.has(PermissionFlagsBits.Administrator) ||
-        member.roles.cache.has(config.roles.mod) ||
-        member.roles.cache.has(config.roles.support)
-    );
 }

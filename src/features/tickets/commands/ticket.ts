@@ -6,10 +6,10 @@ import {
     type TextChannel,
 } from 'discord.js';
 import { type DiscordBot } from '../../../core/client.js';
-import { config } from '../../../config.js';
 import ticketService from '../services/ticketService.js';
 import responseTimeService from '../services/responseTimeService.js';
 import { formatDuration } from '../services/waitTimeEstimator.js';
+import { isTicketStaff } from '../utils/ticketStaff.js';
 
 export const data = new SlashCommandBuilder()
     .setName('ticket')
@@ -76,7 +76,7 @@ export const execute = async (interaction: ChatInputCommandInteraction, client: 
     }
 
     const subcommand = interaction.options.getSubcommand();
-    const isManager = canManageTickets(member);
+    const isManager = isTicketStaff(member);
     const isAdmin = member.permissions.has(PermissionFlagsBits.Administrator);
 
     if (subcommand === 'waitdebug' && !isAdmin) {
@@ -215,12 +215,4 @@ async function getGuildMember(
 ): Promise<GuildMember | null> {
     if (interaction.member instanceof GuildMember) return interaction.member;
     return (await interaction.guild?.members.fetch(interaction.user.id).catch(() => null)) ?? null;
-}
-
-function canManageTickets(member: GuildMember): boolean {
-    return (
-        member.permissions.has(PermissionFlagsBits.Administrator) ||
-        member.roles.cache.has(config.roles.mod) ||
-        member.roles.cache.has(config.roles.support)
-    );
 }

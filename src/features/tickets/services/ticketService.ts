@@ -19,6 +19,7 @@ import { DMService, DMType } from '../../../shared/services/DMService.js';
 import { type TicketOptionConfig } from '../config/TicketConfig.js';
 import logger from '../../../utils/logger.js';
 import { formatDuration } from './waitTimeEstimator.js';
+import { getTicketStaffRoleIds } from '../utils/ticketStaff.js';
 
 type TicketRecord = typeof tickets.$inferSelect;
 
@@ -75,8 +76,7 @@ export class TicketService {
                 },
             ];
 
-            for (const roleId of option.adminRoles || []) {
-                if (!roleId) continue;
+            for (const roleId of getTicketStaffRoleIds(option.adminRoles || [])) {
                 permissionOverwrites.push({
                     id: roleId,
                     type: OverwriteType.Role,

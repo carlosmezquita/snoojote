@@ -194,6 +194,6 @@ function walkConfig(
     }
 }
 
-function isPlaceholderValue(value: string): boolean {
+export function isPlaceholderValue(value: string): boolean {
     return value.includes('_HERE') || value.startsWith('REPLACE_WITH_') || value === 'channel_id';
 }

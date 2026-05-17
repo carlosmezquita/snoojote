@@ -6,7 +6,6 @@ import {
     ticketWaitEstimateSnapshots,
 } from '../../../database/schema.js';
 import { desc, isNotNull, eq, and, isNull, count, gte, inArray } from 'drizzle-orm';
-import { config } from '../../../config.js';
 import {
     WAIT_ESTIMATOR_MODEL_VERSION,
     type EstimationResult,
@@ -20,9 +19,10 @@ import {
     formatDuration,
 } from './waitTimeEstimator.js';
 import logger from '../../../utils/logger.js';
+import { getTicketStaffRoleIds, isTicketStaff } from '../utils/ticketStaff.js';
 
 // ---------------------------------------------------------------------------
-// In-memory cache for guild.members.fetch() — 5-minute TTL
+// In-memory cache for guild.members.fetch() — short TTL
 // ---------------------------------------------------------------------------
 
 interface StaffCacheEntry {
@@ -30,7 +30,18 @@ interface StaffCacheEntry {
     weightedCapacity: number;
     statusBreakdown: Record<StaffStatus, number>;
     staffProfiles: StaffResponseProfile[];
+    missingRoleIds: string[];
     fetchedAt: number;
+    fromCache: boolean;
+}
+
+interface StaffAvailabilitySnapshot {
+    activeCount: number;
+    totalStaffCount: number;
+    activeByStatus: Record<StaffStatus, number>;
+    missingRoleIds: string[];
+    fetchedAt: number;
+    fromCache: boolean;
 }
 
 interface EnrichedStaffProfileCacheEntry {
@@ -103,57 +114,67 @@ export class ResponseTimeService {
         enrichedStaffProfileCache.clear();
     }
 
-    /**
-     * Fetches and counts active staff members (online, dnd, or idle)
-     * using guild.members.fetch() with a 5-minute in-memory cache to
-     * avoid Discord API rate-limits.
-     */
-    async getActiveStaffCount(guild: Guild): Promise<number> {
-        return (await this.getStaffCapacity(guild)).activeCount;
+    async getActiveStaffCount(
+        guild: Guild,
+        options: { forceRefresh?: boolean } = {},
+    ): Promise<number> {
+        return (await this.getStaffCapacity(guild, options)).activeCount;
     }
 
     async getWeightedStaffCapacity(guild: Guild): Promise<number> {
         return (await this.getStaffCapacity(guild)).weightedCapacity;
     }
 
+    async getStaffAvailability(
+        guild: Guild,
+        options: { forceRefresh?: boolean } = {},
+    ): Promise<StaffAvailabilitySnapshot> {
+        const capacity = await this.getStaffCapacity(guild, options);
+        return {
+            activeCount: capacity.activeCount,
+            totalStaffCount: capacity.staffProfiles.length,
+            activeByStatus: capacity.statusBreakdown,
+            missingRoleIds: capacity.missingRoleIds,
+            fetchedAt: capacity.fetchedAt,
+            fromCache: capacity.fromCache,
+        };
+    }
+
     /**
-     * Fetches current support staff status, excluding bots, and converts it to
+     * Fetches current ticket staff status, excluding bots, and converts it to
      * weighted capacity: online 1.0, idle 0.5, dnd 0.25, offline/unknown 0.
      */
-    async getStaffCapacity(guild: Guild): Promise<StaffCacheEntry> {
+    async getStaffCapacity(
+        guild: Guild,
+        options: { forceRefresh?: boolean } = {},
+    ): Promise<StaffCacheEntry> {
         const cacheKey = guild.id;
         const cached = staffCache.get(cacheKey);
 
-        if (cached && Date.now() - cached.fetchedAt < STAFF_CACHE_TTL_MS) {
-            return cached;
+        if (!options.forceRefresh && cached && Date.now() - cached.fetchedAt < STAFF_CACHE_TTL_MS) {
+            return { ...cached, fromCache: true };
         }
 
-        const supportRoleId = config.roles.support;
-        if (!supportRoleId) return emptyStaffCapacity();
+        const staffRoleIds = getTicketStaffRoleIds();
 
-        let fetchedMembers = false;
+        let members;
         try {
             // Requires the GuildPresences intent to avoid undercounting active staff.
-            await guild.members.fetch({ withPresences: true });
-            fetchedMembers = true;
+            members = await guild.members.fetch({ withPresences: true });
         } catch {
             if (cached) {
-                return cached;
+                return { ...cached, fromCache: true };
             }
+
+            return emptyStaffCapacity(staffRoleIds);
         }
 
-        const supportRole = guild.roles.cache.get(supportRoleId);
-        if (!supportRole) return emptyStaffCapacity();
-
-        if (!fetchedMembers) {
-            return emptyStaffCapacity();
-        }
-
+        const missingRoleIds = staffRoleIds.filter((roleId) => !guild.roles.cache.has(roleId));
         const staffProfiles: StaffResponseProfile[] = [];
         const statusBreakdown = emptyStatusBreakdown();
 
-        for (const member of supportRole.members.values()) {
-            if (member.user.bot) continue;
+        members.forEach((member) => {
+            if (member.user.bot || !isTicketStaff(member)) return;
 
             const status = normalizePresenceStatus(
                 member.presence?.status ?? guild.presences.cache.get(member.id)?.status,
@@ -164,7 +185,7 @@ export class ResponseTimeService {
                 status,
                 isBot: member.user.bot,
             });
-        }
+        });
 
         const activeCount = staffProfiles.filter(
             (staff) => computePresenceWeight(staff.status) > 0,
@@ -179,7 +200,9 @@ export class ResponseTimeService {
             weightedCapacity,
             statusBreakdown,
             staffProfiles,
+            missingRoleIds,
             fetchedAt: Date.now(),
+            fromCache: false,
         };
         staffCache.set(cacheKey, entry);
         return entry;
@@ -520,13 +543,15 @@ function normalizePresenceStatus(status: string | undefined): StaffStatus {
     return 'unknown';
 }
 
-function emptyStaffCapacity(): StaffCacheEntry {
+function emptyStaffCapacity(missingRoleIds: string[] = []): StaffCacheEntry {
     return {
         activeCount: 0,
         weightedCapacity: 0,
         statusBreakdown: emptyStatusBreakdown(),
         staffProfiles: [],
+        missingRoleIds,
         fetchedAt: Date.now(),
+        fromCache: false,
     };
 }
 
