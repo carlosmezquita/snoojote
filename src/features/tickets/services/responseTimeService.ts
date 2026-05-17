@@ -176,7 +176,7 @@ export class ResponseTimeService {
         const statusBreakdown = emptyStatusBreakdown();
 
         members.forEach((member) => {
-            if (member.user.bot || !isTicketStaff(member)) return;
+            if (!isTicketStaff(member)) return;
 
             const status = normalizePresenceStatus(
                 member.presence?.status ?? guild.presences.cache.get(member.id)?.status,

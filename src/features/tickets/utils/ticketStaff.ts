@@ -12,6 +12,8 @@ export function getTicketStaffRoleIds(extraRoleIds: string[] = []): string[] {
 }
 
 export function isTicketStaff(member: GuildMember): boolean {
+    if (member.user.bot) return false;
+
     return (
         member.permissions.has(PermissionFlagsBits.Administrator) ||
         getTicketStaffRoleIds().some((roleId) => member.roles.cache.has(roleId))
