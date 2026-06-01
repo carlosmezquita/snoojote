@@ -405,35 +405,46 @@ export class ShopService {
         }
 
         // 2. Upsert items from config
-        for (const configItem of shopCatalog) {
-            // Check if exists by name
-            const existing = await db
-                .select()
-                .from(shopItems)
-                .where(eq(shopItems.name, configItem.name))
-                .get();
+        if (shopCatalog.length > 0) {
+            const existingItems = await db.select().from(shopItems);
+            const existingByName = new Map(existingItems.map((item) => [item.name, item]));
 
-            if (existing) {
-                // Update properties if changed (price, description, value, emoji)
-                if (
-                    existing.price !== configItem.price ||
-                    existing.value !== configItem.value ||
-                    existing.emoji !== configItem.emoji
-                ) {
-                    await db
-                        .update(shopItems)
-                        .set({
-                            description: configItem.description,
-                            price: configItem.price,
-                            type: configItem.type,
-                            value: configItem.value,
-                            emoji: configItem.emoji,
-                        })
-                        .where(eq(shopItems.id, existing.id));
+            const toInsert = [];
+            const toUpdate = [];
+
+            for (const configItem of shopCatalog) {
+                const existing = existingByName.get(configItem.name);
+
+                if (existing) {
+                    if (
+                        existing.price !== configItem.price ||
+                        existing.value !== configItem.value ||
+                        existing.emoji !== configItem.emoji ||
+                        existing.description !== configItem.description ||
+                        existing.type !== configItem.type
+                    ) {
+                        toUpdate.push({
+                            id: existing.id,
+                            updates: {
+                                description: configItem.description,
+                                price: configItem.price,
+                                type: configItem.type,
+                                value: configItem.value,
+                                emoji: configItem.emoji,
+                            },
+                        });
+                    }
+                } else {
+                    toInsert.push(configItem);
                 }
-            } else {
-                // Insert new
-                await db.insert(shopItems).values(configItem);
+            }
+
+            if (toInsert.length > 0) {
+                await db.insert(shopItems).values(toInsert);
+            }
+
+            for (const item of toUpdate) {
+                await db.update(shopItems).set(item.updates).where(eq(shopItems.id, item.id));
             }
         }
     }
