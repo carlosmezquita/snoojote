@@ -1,11 +1,12 @@
 import Canvas from 'canvas';
+import { randomInt } from 'crypto';
 
 export class CaptchaService {
     public generateCaptchaText(length = 5): string {
         const chars = 'ABCDEFGHJKLMNPQRSTUVWXYZ23456789';
         let result = '';
         for (let i = 0; i < length; i++) {
-            result += chars.charAt(Math.floor(Math.random() * chars.length));
+            result += chars.charAt(randomInt(chars.length));
         }
         return result;
     }
