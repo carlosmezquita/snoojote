@@ -5,7 +5,7 @@ import { createEmbed, Colors } from '../../../shared/utils/embeds.js';
 import questService, { QuestType } from '../services/questService.js';
 import voiceSessionService from '../services/voiceSessionService.js';
 import { applyVoiceMinutes } from '../events/voiceStateUpdate.js';
-import { config } from '../../../config.js';
+import { config as _config } from '../../../config.js';
 
 export const data = new SlashCommandBuilder()
     .setName('daily')

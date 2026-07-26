@@ -13,7 +13,7 @@
         "lint:fix": "eslint . --fix",
         "format": "prettier . --write --ignore-unknown",
         "format:check": "prettier . --check --ignore-unknown",
-        "db:check": "bunx drizzle-kit check",
+        "db:check": "npx drizzle-kit check",
         "tickets:backtest-wait": "bun src/scripts/backtestWaitEstimator.ts",
         "check": "bun run typecheck && bun run lint && bun run format:check && bun run db:check && bun test",
         "deploy": "bun src/scripts/deployCommands.ts",

@@ -32,19 +32,16 @@ export class ShopService {
     }
 
     async getInventory(userId: string) {
-        const inventory = await db
-            .select()
+        const results = await db
+            .select({
+                item: shopItems,
+                acquiredAt: userInventory.acquiredAt,
+            })
             .from(userInventory)
+            .innerJoin(shopItems, eq(userInventory.itemId, shopItems.id))
             .where(eq(userInventory.userId, userId));
 
-        const enrichedInventory = [];
-        for (const slot of inventory) {
-            const item = await this.getItem(slot.itemId);
-            if (item) {
-                enrichedInventory.push({ ...item, acquiredAt: slot.acquiredAt });
-            }
-        }
-        return enrichedInventory;
+        return results.map((row) => ({ ...row.item, acquiredAt: row.acquiredAt }));
     }
 
     async buyItem(
