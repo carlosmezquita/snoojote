@@ -3,7 +3,7 @@ import { type DiscordBot } from '../../../core/client.js';
 import { config } from '../../../config.js';
 import streakService from '../services/StreakService.js';
 
-const MIN_SIGNIFICANT_MESSAGE_LENGTH = 10;
+// const MIN_SIGNIFICANT_MESSAGE_LENGTH = 10;
 
 export const name = Events.MessageCreate;
 export const once = false;
