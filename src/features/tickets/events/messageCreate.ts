@@ -5,6 +5,7 @@ import { tickets } from '../../../database/schema.js';
 import { eq, and } from 'drizzle-orm';
 import responseTimeService from '../services/responseTimeService.js';
 import { isTicketStaff } from '../utils/ticketStaff.js';
+import { ticketOptionsList } from '../config/options/index.js';
 
 export default {
     name: Events.MessageCreate,
@@ -12,11 +13,22 @@ export default {
     async execute(message: Message, client: DiscordBot) {
         if (message.author.bot || !message.guild) return;
 
-        // Check if channel is a ticket channel
-        // We can check cache or DB. DB is safer to ensure it's a valid open ticket.
-        // Optimization: Check if channel name starts with ticket prefix or is in ticket category first?
-        // But prefix is configurable per option.
-        // Let's just check DB for this channel ID.
+        // Optimization: Check if channel name starts with ticket prefix or is in ticket category first
+        // to avoid unnecessary DB queries on every message.
+        let isPotentialTicket = false;
+        if (message.channel.isTextBased() && !message.channel.isDMBased()) {
+            const channelName = message.channel.name;
+            const parentId = message.channel.parentId;
+
+            isPotentialTicket = ticketOptionsList.some(
+                (opt) =>
+                    (channelName && channelName.startsWith(opt.channelPrefix)) ||
+                    parentId === opt.categoryId ||
+                    (opt.closedCategoryId && parentId === opt.closedCategoryId),
+            );
+        }
+
+        if (!isPotentialTicket) return;
 
         // Only proceed if the user is ticket staff.
         const member = message.member;
