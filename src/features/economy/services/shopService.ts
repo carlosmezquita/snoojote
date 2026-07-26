@@ -1,6 +1,6 @@
 import db from '../../../database/db.js';
 import { shopItems, shopPurchaseLocks, userInventory } from '../../../database/schema.js';
-import { eq, and, asc, sql } from 'drizzle-orm';
+import { eq, and, asc, sql, notInArray } from 'drizzle-orm';
 import economyService from './economyService.js';
 import {
     type ButtonInteraction,
@@ -393,15 +393,19 @@ export class ShopService {
         const configNames = shopCatalog.map((i) => i.name);
 
         // 1. Delete items not in config
-        const dbItems = await db.select().from(shopItems);
-        for (const dbItem of dbItems) {
-            if (!configNames.includes(dbItem.name)) {
-                await db.delete(shopItems).where(eq(shopItems.id, dbItem.id));
-                logger.info('Removed obsolete shop item', {
-                    itemId: dbItem.id,
-                    itemName: dbItem.name,
-                });
-            }
+        const deletedItems =
+            configNames.length > 0
+                ? await db
+                      .delete(shopItems)
+                      .where(notInArray(shopItems.name, configNames))
+                      .returning()
+                : await db.delete(shopItems).returning();
+
+        for (const dbItem of deletedItems) {
+            logger.info('Removed obsolete shop item', {
+                itemId: dbItem.id,
+                itemName: dbItem.name,
+            });
         }
 
         // 2. Upsert items from config
