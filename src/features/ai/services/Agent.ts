@@ -12,7 +12,6 @@ export class Agent {
         const model = resolveGroqModel(config.ai.model);
         const qwenOptions = isQwen36Model(model)
             ? {
-                  reasoningEffort: 'none' as const,
                   reasoningFormat: 'hidden' as const,
               }
             : {};
