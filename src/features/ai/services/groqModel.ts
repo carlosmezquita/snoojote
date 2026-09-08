@@ -19,6 +19,13 @@ export function resolveGroqMaxTokens(model: string, configuredMaxTokens: number)
     return configuredMaxTokens;
 }
 
-export function isQwen36Model(model: string): boolean {
-    return resolveGroqModel(model) === QWEN_3_6_MODEL;
+export function resolveGroqReasoningOptions(model: string) {
+    if (resolveGroqModel(model) === QWEN_3_6_MODEL) {
+        return {
+            reasoningEffort: 'none' as const,
+            reasoningFormat: 'hidden' as const,
+        };
+    }
+
+    return {};
 }
