@@ -1,6 +1,6 @@
 import db from '../../../database/db.js';
 import { shopItems, shopPurchaseLocks, userInventory } from '../../../database/schema.js';
-import { eq, and, asc, sql } from 'drizzle-orm';
+import { eq, and, asc, sql, inArray } from 'drizzle-orm';
 import economyService from './economyService.js';
 import {
     type ButtonInteraction,
@@ -392,33 +392,38 @@ export class ShopService {
         // Sync DB with Config
         const configNames = shopCatalog.map((i) => i.name);
 
-        // 1. Delete items not in config
         const dbItems = await db.select().from(shopItems);
-        for (const dbItem of dbItems) {
-            if (!configNames.includes(dbItem.name)) {
-                await db.delete(shopItems).where(eq(shopItems.id, dbItem.id));
+
+        // 1. Delete items not in config
+        const itemsToDelete = dbItems.filter((dbItem) => !configNames.includes(dbItem.name));
+
+        if (itemsToDelete.length > 0) {
+            const idsToDelete = itemsToDelete.map((i) => i.id);
+            await db.delete(shopItems).where(inArray(shopItems.id, idsToDelete));
+
+            itemsToDelete.forEach((dbItem) => {
                 logger.info('Removed obsolete shop item', {
                     itemId: dbItem.id,
                     itemName: dbItem.name,
                 });
-            }
+            });
         }
+
+        const newItemsToInsert = [];
 
         // 2. Upsert items from config
         for (const configItem of shopCatalog) {
             // Check if exists by name
-            const existing = await db
-                .select()
-                .from(shopItems)
-                .where(eq(shopItems.name, configItem.name))
-                .get();
+            const existing = dbItems.find((item) => item.name === configItem.name);
 
             if (existing) {
                 // Update properties if changed (price, description, value, emoji)
                 if (
                     existing.price !== configItem.price ||
                     existing.value !== configItem.value ||
-                    existing.emoji !== configItem.emoji
+                    existing.emoji !== configItem.emoji ||
+                    existing.description !== configItem.description ||
+                    existing.type !== configItem.type
                 ) {
                     await db
                         .update(shopItems)
@@ -432,9 +437,13 @@ export class ShopService {
                         .where(eq(shopItems.id, existing.id));
                 }
             } else {
-                // Insert new
-                await db.insert(shopItems).values(configItem);
+                // Accumulate new items
+                newItemsToInsert.push(configItem);
             }
+        }
+
+        if (newItemsToInsert.length > 0) {
+            await db.insert(shopItems).values(newItemsToInsert);
         }
     }
 }
