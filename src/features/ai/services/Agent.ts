@@ -2,6 +2,7 @@ import { ChatGroq } from '@langchain/groq';
 import { ChatPromptTemplate, MessagesPlaceholder } from '@langchain/core/prompts';
 import { SystemMessage, type BaseMessage } from '@langchain/core/messages';
 import { config } from '../../../config.js';
+import { resolveGroqModel } from './groqModel.js';
 
 export class Agent {
     private chatGroq: ChatGroq;
@@ -11,7 +12,7 @@ export class Agent {
         this.chatGroq = new ChatGroq({
             maxTokens: config.ai.maxTokens,
             temperature: config.ai.temperature,
-            model: config.ai.model,
+            model: resolveGroqModel(config.ai.model),
             apiKey: process.env.GROQ_API_KEY,
         });
 
