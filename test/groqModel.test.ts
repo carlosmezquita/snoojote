@@ -14,16 +14,16 @@ describe('Groq model config', () => {
         expect(resolveGroqModel('qwen/qwen3.8-27b')).toBe('qwen/qwen3.8-27b');
     });
 
-    test('caps Qwen 3.6 output below the free-tier OTPM limit', () => {
-        expect(resolveGroqMaxTokens('qwen/qwen3.6-27b', 1024)).toBe(800);
+    test('caps Qwen 3.6 output for the free-tier OTPM budget', () => {
+        expect(resolveGroqMaxTokens('qwen/qwen3.6-27b', 1024)).toBe(500);
     });
 
     test('caps legacy Llama configs after resolving them to Qwen', () => {
-        expect(resolveGroqMaxTokens('llama-3.1-8b-instant', 1024)).toBe(800);
+        expect(resolveGroqMaxTokens('llama-3.1-8b-instant', 1024)).toBe(500);
     });
 
     test('does not increase smaller configured Qwen limits', () => {
-        expect(resolveGroqMaxTokens('qwen/qwen3.6-27b', 500)).toBe(500);
+        expect(resolveGroqMaxTokens('qwen/qwen3.6-27b', 400)).toBe(400);
     });
 
     test('does not cap unrelated models', () => {
