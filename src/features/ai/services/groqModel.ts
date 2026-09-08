@@ -1,5 +1,5 @@
 const QWEN_3_6_MODEL = 'qwen/qwen3.6-27b';
-const QWEN_3_6_FREE_TIER_MAX_TOKENS = 800;
+const QWEN_3_6_FREE_TIER_MAX_TOKENS = 500;
 
 const GROQ_MODEL_REPLACEMENTS: Record<string, string> = {
     'llama-3.1-8b-instant': QWEN_3_6_MODEL,
