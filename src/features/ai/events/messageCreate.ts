@@ -4,6 +4,7 @@ import { config } from '../../../config.js';
 import { Agent } from '../services/Agent.js';
 import { HumanMessage, AIMessage, type BaseMessage } from '@langchain/core/messages';
 import logger from '../../../utils/logger.js';
+import { stripLeadingThinking } from '../services/responseSanitizer.js';
 
 const agent = new Agent();
 
@@ -62,7 +63,13 @@ export default {
                     .trim();
 
                 const response = await agent.getResponse(text, history);
-                let content = response.content as string;
+                let content = stripLeadingThinking(response.content as string);
+
+                if (!content) {
+                    logger.warn('AI response contained no visible content after sanitization');
+                    await message.reply('No he podido generar una respuesta. Inténtalo de nuevo.');
+                    return;
+                }
 
                 if (content.length > 2000) {
                     content = content.slice(0, 1993) + ' (...)';
