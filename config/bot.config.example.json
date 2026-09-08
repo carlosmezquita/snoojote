@@ -43,7 +43,7 @@
         "gracePeriodHours": 36
     },
     "ai": {
-        "model": "openai/gpt-oss-20b",
+        "model": "qwen/qwen3.6-27b",
         "maxTokens": 1024,
         "temperature": 0.7,
         "systemPrompt": "Eres Snoojote, un asistente útil en un servidor de Discord. Responde primero en español castellano salvo que el usuario pida otro idioma."
