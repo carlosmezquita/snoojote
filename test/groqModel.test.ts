@@ -1,8 +1,8 @@
 import { describe, expect, test } from 'bun:test';
 import {
-    isQwen36Model,
     resolveGroqMaxTokens,
     resolveGroqModel,
+    resolveGroqReasoningOptions,
 } from '../src/features/ai/services/groqModel.js';
 
 describe('Groq model config', () => {
@@ -30,9 +30,21 @@ describe('Groq model config', () => {
         expect(resolveGroqMaxTokens('qwen/qwen3.8-27b', 1024)).toBe(1024);
     });
 
-    test('identifies Qwen 3.6 including legacy configs that resolve to it', () => {
-        expect(isQwen36Model('qwen/qwen3.6-27b')).toBe(true);
-        expect(isQwen36Model('llama-3.1-8b-instant')).toBe(true);
-        expect(isQwen36Model('qwen/qwen3.8-27b')).toBe(false);
+    test('disables Qwen 3.6 reasoning while keeping it hidden defensively', () => {
+        expect(resolveGroqReasoningOptions('qwen/qwen3.6-27b')).toEqual({
+            reasoningEffort: 'none',
+            reasoningFormat: 'hidden',
+        });
+    });
+
+    test('applies Qwen reasoning settings to legacy Llama configs', () => {
+        expect(resolveGroqReasoningOptions('llama-3.1-8b-instant')).toEqual({
+            reasoningEffort: 'none',
+            reasoningFormat: 'hidden',
+        });
+    });
+
+    test('does not alter reasoning settings for unrelated models', () => {
+        expect(resolveGroqReasoningOptions('qwen/qwen3.8-27b')).toEqual({});
     });
 });
