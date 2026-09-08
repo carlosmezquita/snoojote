@@ -2,18 +2,26 @@ import { ChatGroq } from '@langchain/groq';
 import { ChatPromptTemplate, MessagesPlaceholder } from '@langchain/core/prompts';
 import { SystemMessage, type BaseMessage } from '@langchain/core/messages';
 import { config } from '../../../config.js';
-import { resolveGroqModel } from './groqModel.js';
+import { isQwen36Model, resolveGroqMaxTokens, resolveGroqModel } from './groqModel.js';
 
 export class Agent {
     private chatGroq: ChatGroq;
     private chain: any;
 
     constructor() {
+        const model = resolveGroqModel(config.ai.model);
+        const qwenOptions = isQwen36Model(model)
+            ? {
+                  reasoningFormat: 'hidden' as const,
+              }
+            : {};
+
         this.chatGroq = new ChatGroq({
-            maxTokens: config.ai.maxTokens,
+            maxTokens: resolveGroqMaxTokens(model, config.ai.maxTokens),
             temperature: config.ai.temperature,
-            model: resolveGroqModel(config.ai.model),
+            model,
             apiKey: process.env.GROQ_API_KEY,
+            ...qwenOptions,
         });
 
         const prompt = ChatPromptTemplate.fromMessages([
