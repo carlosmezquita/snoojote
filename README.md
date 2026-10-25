@@ -108,6 +108,16 @@ bun run check
 
 This runs TypeScript type checking, ESLint, Prettier format verification, Drizzle schema checks, and Bun unit tests.
 
+GitHub Actions runs the same gate on every push and pull request with the pinned Bun version and
+a frozen dependency lockfile. Type checking includes test files. Configure `Quality gate` as a
+required branch check if merges should be blocked until it passes.
+
+`bun test` preloads `test/setup.ts`, forces test mode, and opens an in-memory SQLite database.
+It applies the real migration chain; tests never open `data/database.sqlite`. Discord calls in
+workflow tests use local fakes and require no bot token.
+
+For database upgrades and pending purchase/ticket recovery, see [MIGRATIONS.md](MIGRATIONS.md).
+
 Useful individual commands:
 
 ```bash
@@ -116,6 +126,10 @@ bun run format:check
 bun run typecheck
 bun test
 ```
+
+`bun run tickets:backtest-wait` evaluates saved forecasts issued before a ticket's first response,
+grouped by model version. It reports skipped tickets without valid forecasts and measures answered
+tickets only; historical staff presence and queue state are not inferred.
 
 ## Migrating From the Old Bot
 

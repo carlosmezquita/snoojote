@@ -6,6 +6,7 @@ export const tickets = sqliteTable(
     {
         id: integer('id').primaryKey({ autoIncrement: true }),
         channelId: text('channel_id').notNull(),
+        guildId: text('guild_id'),
         userId: text('user_id').notNull(),
         optionId: text('option_id'),
         status: text('status').default('open').notNull(),
@@ -22,6 +23,7 @@ export const tickets = sqliteTable(
         staffOnlineAtCreation: integer('staff_online_at_creation'),
         staffCapacityAtCreation: real('staff_capacity_at_creation'),
         openTicketsAtCreation: integer('open_tickets_at_creation'),
+        unansweredTicketsAtCreation: integer('unanswered_tickets_at_creation'),
     },
     (table) => ({
         // Optimizes ticket closure and lookup by channel
@@ -182,6 +184,33 @@ export const shopPurchaseLocks = sqliteTable('shop_purchase_locks', {
         .default(sql`(unixepoch())`)
         .notNull(),
 });
+
+// A pending purchase blocks another debit until it is completed or refunded.
+// No FK to the catalog: recovery must survive an item being removed from config.
+export const shopPurchases = sqliteTable(
+    'shop_purchases',
+    {
+        id: text('id').primaryKey(),
+        userId: text('user_id').notNull(),
+        guildId: text('guild_id').notNull(),
+        itemId: integer('item_id').notNull(),
+        price: integer('price').notNull(),
+        roleId: text('role_id'),
+        roleWasOwned: integer('role_was_owned', { mode: 'boolean' }).default(false).notNull(),
+        status: text('status', { enum: ['pending', 'completed', 'refunded'] })
+            .default('pending')
+            .notNull(),
+        lastError: text('last_error'),
+        createdAt: integer('created_at', { mode: 'timestamp' })
+            .default(sql`(unixepoch())`)
+            .notNull(),
+    },
+    (table) => ({
+        pendingUserIdx: uniqueIndex('shop_purchase_pending_user_idx')
+            .on(table.userId)
+            .where(sql`${table.status} = 'pending'`),
+    }),
+);
 
 export const economyTransactionLocks = sqliteTable('economy_transaction_locks', {
     lockKey: text('lock_key').primaryKey(),

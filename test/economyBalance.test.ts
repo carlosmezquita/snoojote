@@ -1,5 +1,5 @@
-import { afterEach, beforeAll, describe, expect, test } from 'bun:test';
-import { and, eq, inArray, like, sql } from 'drizzle-orm';
+import { afterEach, describe, expect, test } from 'bun:test';
+import { and, eq, inArray, like } from 'drizzle-orm';
 import db from '../src/database/db.js';
 import { economyDailyEarnings, economyTransactionLocks, users } from '../src/database/schema.js';
 import economyService, {
@@ -8,38 +8,6 @@ import economyService, {
 
 const testRunId = `test-economy-${Date.now()}`;
 const testUserIds = new Set<string>();
-
-beforeAll(() => {
-    db.run(sql`
-        CREATE TABLE IF NOT EXISTS users (
-            user_id text PRIMARY KEY NOT NULL,
-            points integer DEFAULT 0 NOT NULL,
-            level integer DEFAULT 1 NOT NULL,
-            daily_quest text,
-            last_daily integer,
-            last_activity_date integer
-        )
-    `);
-    db.run(sql`
-        CREATE TABLE IF NOT EXISTS economy_daily_earnings (
-            id integer PRIMARY KEY AUTOINCREMENT NOT NULL,
-            user_id text NOT NULL,
-            date_key text NOT NULL,
-            source text NOT NULL,
-            amount integer DEFAULT 0 NOT NULL
-        )
-    `);
-    db.run(sql`
-        CREATE UNIQUE INDEX IF NOT EXISTS economy_daily_user_date_source_idx
-        ON economy_daily_earnings (user_id, date_key, source)
-    `);
-    db.run(sql`
-        CREATE TABLE IF NOT EXISTS economy_transaction_locks (
-            lock_key text PRIMARY KEY NOT NULL,
-            created_at integer DEFAULT (CURRENT_TIMESTAMP) NOT NULL
-        )
-    `);
-});
 
 const testUserId = (label: string) => {
     const userId = `${testRunId}-${label}`;

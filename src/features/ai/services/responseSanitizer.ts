@@ -12,9 +12,7 @@ export function stripLeadingThinking(content: string): string {
             return '';
         }
 
-        result = afterOpeningTag
-            .slice(closingTag.index + closingTag[0].length)
-            .trimStart();
+        result = afterOpeningTag.slice(closingTag.index + closingTag[0].length).trimStart();
     }
 
     return result.trimEnd();

@@ -1,21 +1,20 @@
 import db from '../../../database/db.js';
-import { shopItems, shopPurchaseLocks, userInventory } from '../../../database/schema.js';
-import { eq, and, asc, sql } from 'drizzle-orm';
+import { shopItems, userInventory } from '../../../database/schema.js';
+import { eq, and, asc } from 'drizzle-orm';
 import economyService from './economyService.js';
 import {
     type ButtonInteraction,
     PermissionFlagsBits,
     type ChatInputCommandInteraction,
 } from 'discord.js';
-import { RESTJSONErrorCodes } from 'discord-api-types/v10';
+import purchaseService, { type RoleDelivery } from './purchaseService.js';
+import { type Client } from 'discord.js';
 import { shopCatalog, type ShopItemConfig } from '../shopConfig.js';
 import logger from '../../../utils/logger.js';
 
 type ShopInteraction = ChatInputCommandInteraction | ButtonInteraction;
 
-const PURCHASE_LOCK_TTL_MS = 10 * 60 * 1000;
-const GENERIC_PURCHASE_ERROR =
-    'No pude completar la compra. Se ha reembolsado el importe si ya se había cobrado.';
+const GENERIC_PURCHASE_ERROR = 'No pude completar la compra. No se ha cobrado el importe.';
 
 export class ShopService {
     async getShopItems() {
@@ -77,223 +76,100 @@ export class ShopService {
 
         logger.info('Shop purchase requested', purchaseMetadata);
 
-        const purchaseLockKey = this.getPurchaseLockKey(userId);
-        const lockAcquired = await this.acquirePurchaseLock(purchaseLockKey, userId, item.id);
-        if (!lockAcquired) {
-            logger.info('Shop purchase rejected because another purchase is already running', {
+        // Check Balance
+        const balance = await economyService.getBalance(userId);
+        if (balance < item.price) {
+            logger.info('Shop purchase rejected for insufficient balance', {
                 ...purchaseMetadata,
-                purchaseLockKey,
+                balance,
             });
             return {
                 success: false,
-                message: 'Ya hay una compra en proceso. Inténtalo de nuevo en unos segundos.',
+                message: `No tienes suficientes Pesetas. Necesitas **${item.price} ₧**.`,
             };
         }
 
-        try {
-            // Check Balance
-            const balance = await economyService.getBalance(userId);
-            if (balance < item.price) {
-                logger.info('Shop purchase rejected for insufficient balance', {
+        // Check if already owns
+        const existing = await db
+            .select()
+            .from(userInventory)
+            .where(and(eq(userInventory.userId, userId), eq(userInventory.itemId, item.id)))
+            .get();
+
+        if (existing && !isConsumable) {
+            logger.info('Shop purchase rejected because item is already owned', purchaseMetadata);
+            return { success: false, message: 'Ya tienes este artículo.' };
+        }
+
+        if (item.type === 'ROLE') {
+            const progressionResult = await this.validateRankProgression(userId, catalogItem);
+            if (!progressionResult.success) {
+                logger.info('Shop purchase rejected by rank progression rules', {
                     ...purchaseMetadata,
-                    balance,
+                    reason: progressionResult.message,
                 });
-                return {
-                    success: false,
-                    message: `No tienes suficientes Pesetas. Necesitas **${item.price} ₧**.`,
-                };
+                return progressionResult;
             }
+        }
 
-            // Check if already owns
-            const existing = await db
-                .select()
-                .from(userInventory)
-                .where(and(eq(userInventory.userId, userId), eq(userInventory.itemId, item.id)))
-                .get();
-
-            if (existing && !isConsumable) {
-                logger.info(
-                    'Shop purchase rejected because item is already owned',
-                    purchaseMetadata,
-                );
-                return { success: false, message: 'Ya tienes este artículo.' };
-            }
-
-            if (item.type === 'ROLE') {
-                const progressionResult = await this.validateRankProgression(userId, catalogItem);
-                if (!progressionResult.success) {
-                    logger.info('Shop purchase rejected by rank progression rules', {
-                        ...purchaseMetadata,
-                        reason: progressionResult.message,
-                    });
-                    return progressionResult;
-                }
-            }
-
-            // Process Role Assignment
-            let paid = false;
-            if (item.type === 'ROLE') {
-                const roleId = item.value;
-
-                if (!interaction.guild) {
-                    logger.warn(
-                        'Shop role purchase failed outside a guild context',
-                        purchaseMetadata,
-                    );
-                    return {
-                        success: false,
-                        message: GENERIC_PURCHASE_ERROR,
-                    };
-                }
-
-                try {
-                    // Check if Role ID is the placeholder
-                    if (roleId.startsWith('REPLACE') || roleId.includes('_HERE')) {
-                        logger.error(
-                            'Shop role purchase failed because role ID is not configured',
-                            {
-                                ...purchaseMetadata,
-                                roleId,
-                            },
-                        );
-                        return {
-                            success: false,
-                            message: GENERIC_PURCHASE_ERROR,
-                        };
-                    }
-
-                    const role = await interaction.guild.roles.fetch(roleId);
-
-                    if (!role) {
-                        logger.error(
-                            'Shop role purchase failed because configured role was not found',
-                            {
-                                ...purchaseMetadata,
-                                roleId,
-                            },
-                        );
-                        return {
-                            success: false,
-                            message: GENERIC_PURCHASE_ERROR,
-                        };
-                    }
-
-                    const [botMember, member] = await Promise.all([
-                        interaction.guild.members.fetchMe({ force: true }),
-                        interaction.guild.members.fetch({ user: interaction.user.id, force: true }),
-                    ]);
-                    const botHasManageRoles = botMember.permissions.has(
-                        PermissionFlagsBits.ManageRoles,
-                    );
-                    const botRoleIsHighEnough = role.comparePositionTo(botMember.roles.highest) < 0;
-                    if (
-                        !botHasManageRoles ||
-                        role.managed ||
-                        !botRoleIsHighEnough ||
-                        !role.editable
-                    ) {
-                        logger.error('Shop role purchase failed due to bot permissions', {
-                            ...purchaseMetadata,
-                            roleId,
-                            roleName: role.name,
-                            roleManaged: role.managed,
-                            rolePosition: role.position,
-                            botHasManageRoles,
-                            botRoleIsHighEnough,
-                            roleEditable: role.editable,
-                            botHighestRole: botMember.roles.highest.name,
-                            botHighestRolePosition: botMember.roles.highest.position,
-                        });
-
-                        return {
-                            success: false,
-                            message: GENERIC_PURCHASE_ERROR,
-                        };
-                    }
-
-                    paid = await economyService.spendBalance(userId, item.price);
-                    if (!paid) {
-                        logger.warn('Shop role purchase payment failed after balance check', {
-                            ...purchaseMetadata,
-                            balance,
-                        });
-                        return {
-                            success: false,
-                            message: `No tienes suficientes Pesetas. Necesitas **${item.price} ₧**.`,
-                        };
-                    }
-
-                    await member.roles.add(role, `Compra en tienda: ${item.name}`);
-                } catch (error) {
-                    if (paid) {
-                        await economyService.addBalance(userId, item.price);
-                    }
-                    const discordErrorCode = this.getDiscordErrorCode(error);
-                    logger.error('Shop role purchase failed during role assignment', {
-                        ...purchaseMetadata,
-                        roleId,
-                        refunded: paid,
-                        discordErrorCode,
-                        error,
-                    });
-
-                    if (
-                        discordErrorCode === RESTJSONErrorCodes.MissingPermissions ||
-                        discordErrorCode === RESTJSONErrorCodes.MissingAccess
-                    ) {
-                        return {
-                            success: false,
-                            message: GENERIC_PURCHASE_ERROR,
-                        };
-                    }
-
-                    return {
-                        success: false,
-                        message: GENERIC_PURCHASE_ERROR,
-                    };
-                }
-            }
-
-            if (!paid) {
-                paid = await economyService.spendBalance(userId, item.price);
-                if (!paid) {
-                    logger.warn('Shop purchase payment failed after balance check', {
-                        ...purchaseMetadata,
-                        balance,
-                    });
-                    return {
-                        success: false,
-                        message: `No tienes suficientes Pesetas. Necesitas **${item.price} ₧**.`,
-                    };
-                }
-            }
-
+        let roleWasOwned = false;
+        if (item.type === 'ROLE') {
+            if (!interaction.guild) return { success: false, message: GENERIC_PURCHASE_ERROR };
             try {
-                await db.insert(userInventory).values({
-                    userId,
-                    itemId: item.id,
-                });
+                const role = await interaction.guild.roles.fetch(item.value);
+                const [bot, member] = await Promise.all([
+                    interaction.guild.members.fetchMe({ force: true }),
+                    interaction.guild.members.fetch({ user: userId, force: true }),
+                ]);
+                if (
+                    !role ||
+                    role.managed ||
+                    !role.editable ||
+                    !bot.permissions.has(PermissionFlagsBits.ManageRoles) ||
+                    role.comparePositionTo(bot.roles.highest) >= 0
+                ) {
+                    return { success: false, message: GENERIC_PURCHASE_ERROR };
+                }
+                roleWasOwned = member.roles.cache.has(role.id);
             } catch (error) {
-                await economyService.addBalance(userId, item.price);
-                logger.error('Shop purchase failed while saving inventory item', {
-                    ...purchaseMetadata,
-                    refunded: true,
-                    error,
-                });
-                return {
-                    success: false,
-                    message: GENERIC_PURCHASE_ERROR,
-                };
+                logger.error('Shop role validation failed', { ...purchaseMetadata, error });
+                return { success: false, message: GENERIC_PURCHASE_ERROR };
             }
-
-            logger.info('Shop purchase completed', purchaseMetadata);
-            return {
-                success: true,
-                message: `¡Has comprado **${item.name}** por ${item.price} ₧!`,
-            };
-        } finally {
-            await this.releasePurchaseLock(purchaseLockKey);
         }
+
+        const purchase = purchaseService.reserve({
+            userId,
+            guildId,
+            itemId: item.id,
+            price: item.price,
+            roleId: item.type === 'ROLE' ? item.value : undefined,
+            roleWasOwned,
+            consumable: isConsumable,
+        });
+        if (!purchase)
+            return {
+                success: false,
+                message:
+                    'Compra no disponible: revisa tu saldo, inventario o una compra pendiente.',
+            };
+        const status = await purchaseService.deliver(
+            purchase,
+            discordRoleDelivery(interaction.client),
+        );
+        if (status !== 'completed')
+            return {
+                success: false,
+                message:
+                    status === 'refunded'
+                        ? 'No pude completar la compra. El importe se ha reembolsado.'
+                        : 'La compra está pendiente de revisión. No vuelvas a comprar; contacta con el equipo.',
+            };
+
+        logger.info('Shop purchase completed', purchaseMetadata);
+        return {
+            success: true,
+            message: `¡Has comprado **${item.name}** por ${item.price} ₧!`,
+        };
     }
 
     private getCatalogItem(itemName: string): ShopItemConfig | undefined {
@@ -351,43 +227,6 @@ export class ShopService {
         return { success: true, message: '' };
     }
 
-    private getDiscordErrorCode(error: unknown): number | undefined {
-        if (typeof error !== 'object' || error === null || !('code' in error)) {
-            return undefined;
-        }
-
-        const code = (error as { code: unknown }).code;
-        return typeof code === 'number' ? code : undefined;
-    }
-
-    private getPurchaseLockKey(userId: string): string {
-        return userId;
-    }
-
-    private async acquirePurchaseLock(
-        lockKey: string,
-        userId: string,
-        itemId: number,
-    ): Promise<boolean> {
-        const staleBefore = new Date(Date.now() - PURCHASE_LOCK_TTL_MS);
-        await db
-            .delete(shopPurchaseLocks)
-            .where(sql`${shopPurchaseLocks.createdAt} < ${staleBefore}`);
-
-        const result = await db
-            .insert(shopPurchaseLocks)
-            .values({ lockKey, userId, itemId })
-            .onConflictDoNothing()
-            .returning({ lockKey: shopPurchaseLocks.lockKey })
-            .get();
-
-        return Boolean(result);
-    }
-
-    private async releasePurchaseLock(lockKey: string): Promise<void> {
-        await db.delete(shopPurchaseLocks).where(eq(shopPurchaseLocks.lockKey, lockKey));
-    }
-
     async seedItems() {
         // Sync DB with Config
         const configNames = shopCatalog.map((i) => i.name);
@@ -437,6 +276,24 @@ export class ShopService {
             }
         }
     }
+}
+
+export function discordRoleDelivery(client: Client): RoleDelivery {
+    const memberFor = async (purchase: Parameters<RoleDelivery['hasRole']>[0]) => {
+        const guild = await client.guilds.fetch(purchase.guildId);
+        return guild.members.fetch({ user: purchase.userId, force: true });
+    };
+    return {
+        hasRole: async (purchase) => (await memberFor(purchase)).roles.cache.has(purchase.roleId!),
+        addRole: async (purchase) => {
+            await (await memberFor(purchase)).roles.add(purchase.roleId!, 'Shop purchase');
+        },
+        removeRole: async (purchase) => {
+            await (
+                await memberFor(purchase)
+            ).roles.remove(purchase.roleId!, 'Shop purchase rollback');
+        },
+    };
 }
 
 export default new ShopService();
