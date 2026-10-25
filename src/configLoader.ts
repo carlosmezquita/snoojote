@@ -3,12 +3,12 @@ import path from 'path';
 import { z } from 'zod';
 
 const shopItemSchema = z.object({
-    name: z.string().min(1),
-    description: z.string().min(1),
+    name: z.string().min(1).max(60),
+    description: z.string().min(1).max(120),
     price: z.number().int().positive(),
     type: z.enum(['ROLE', 'COLLECTIBLE', 'CONSUMABLE']),
     value: z.string().min(1),
-    emoji: z.string().min(1).optional(),
+    emoji: z.string().min(1).max(16).optional(),
     rankOrder: z.number().int().positive().optional(),
 });
 
@@ -59,6 +59,10 @@ const botConfigSchema = z.object({
         maxTokens: z.number().int().positive(),
         temperature: z.number().min(0).max(2),
         systemPrompt: z.string().min(1),
+        cooldownSeconds: z.number().int().min(5).max(3600).default(30),
+        maxConcurrent: z.number().int().min(1).max(10).default(2),
+        timeoutMs: z.number().int().min(1000).max(60_000).default(15_000),
+        contextCharacters: z.number().int().min(2000).max(32_000).default(12_000),
     }),
     economy: z.object({
         messageRewards: z.object({
@@ -78,7 +82,7 @@ const botConfigSchema = z.object({
             max: z.number().int().positive(),
         }),
         milestoneBonuses: z.record(z.string(), z.number().int().nonnegative()),
-        shopCatalog: z.array(shopItemSchema).min(1),
+        shopCatalog: z.array(shopItemSchema).min(1).max(25),
     }),
 });
 
@@ -108,6 +112,29 @@ export function loadBotConfig(options: LoadBotConfigOptions = {}): RuntimeBotCon
     const rawConfig = JSON.parse(fs.readFileSync(configPath, 'utf8')) as unknown;
     const parsed = botConfigSchema
         .superRefine((config, ctx) => {
+            const names = config.economy.shopCatalog.map((item) => item.name);
+            const ranks = config.economy.shopCatalog
+                .filter((item) => item.type === 'ROLE')
+                .map((item) => item.rankOrder)
+                .sort((a, b) => (a ?? 0) - (b ?? 0));
+            if (
+                new Set(names).size !== names.length ||
+                ranks.some((rank, index) => rank !== index + 1)
+            ) {
+                ctx.addIssue({
+                    code: z.ZodIssueCode.custom,
+                    path: ['economy', 'shopCatalog'],
+                    message:
+                        'Catalog names must be unique and role ranks must be consecutive starting at 1',
+                });
+            }
+            if (validatePlaceholders && !config.discord.guildId) {
+                ctx.addIssue({
+                    code: z.ZodIssueCode.custom,
+                    path: ['discord', 'guildId'],
+                    message: 'guildId is required for this single-guild bot',
+                });
+            }
             if (config.economy.messageRewards.max < config.economy.messageRewards.min) {
                 ctx.addIssue({
                     code: z.ZodIssueCode.custom,

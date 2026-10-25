@@ -2,6 +2,7 @@ interface VoiceSession {
     channelId: string;
     startedAt: number;
 }
+import { getSpainDateKey } from '../../streaks/services/streakRules.js';
 
 const MINUTE_MS = 60 * 1000;
 
@@ -50,6 +51,41 @@ export class VoiceSessionService {
 
     getSession(userId: string): VoiceSession | undefined {
         return this.sessions.get(userId);
+    }
+
+    collectDated(
+        userId: string,
+        now = Date.now(),
+        stop = false,
+    ): { channelId: string; minutes: number; earnedAt: Date }[] {
+        const session = this.sessions.get(userId);
+        if (!session) return [];
+        const minutes = this.calculateWholeMinutes(session.startedAt, now);
+        const lastCompletion = session.startedAt + minutes * MINUTE_MS;
+        const slices: { channelId: string; minutes: number; earnedAt: Date }[] = [];
+        let completion = session.startedAt + MINUTE_MS;
+        while (completion <= lastCompletion) {
+            const key = getSpainDateKey(new Date(completion));
+            let low = completion;
+            let high = completion + 30 * 60 * MINUTE_MS;
+            // Find the next local calendar boundary, including 23/25-hour DST days.
+            while (low + 1 < high) {
+                const midpoint = Math.floor((low + high) / 2);
+                if (getSpainDateKey(new Date(midpoint)) === key) low = midpoint;
+                else high = midpoint;
+            }
+            const count =
+                Math.floor((Math.min(lastCompletion, high - 1) - completion) / MINUTE_MS) + 1;
+            slices.push({
+                channelId: session.channelId,
+                minutes: count,
+                earnedAt: new Date(completion),
+            });
+            completion += count * MINUTE_MS;
+        }
+        session.startedAt = lastCompletion;
+        if (stop) this.sessions.delete(userId);
+        return slices;
     }
 
     private calculateWholeMinutes(startedAt: number, now: number): number {

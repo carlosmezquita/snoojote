@@ -1,10 +1,9 @@
 import { type Message, type TextChannel } from 'discord.js';
-import { asc, desc, eq } from 'drizzle-orm';
+import { asc, desc, eq, and, count, sql } from 'drizzle-orm';
 import db from '../../../database/db.js';
-import { shopItems, streaks, userInventory } from '../../../database/schema.js';
+import { shopItems, streaks, userInventory, users } from '../../../database/schema.js';
 import { config } from '../../../config.js';
 import { type DiscordBot } from '../../../core/client.js';
-import economyService from '../../economy/services/economyService.js';
 import {
     getNewMilestones,
     getSpainDateKey,
@@ -16,104 +15,97 @@ import {
 const BOT_CHANNEL_ID = config.channels.bot;
 const STREAK_FREEZE_VALUE = 'STREAK_FREEZE';
 
-type StreakRecord = typeof streaks.$inferSelect;
-
 export class StreakService {
     async handleStreak(message: Message, client: DiscordBot) {
-        const userId = message.author.id;
-        const now = new Date();
-        const todayKey = getSpainDateKey(now);
-
-        try {
-            const userStreak = await this.getUserStreak(userId);
-
-            if (userStreak) {
-                await this.updateExistingStreak(message, userStreak, todayKey, now, client);
-            } else {
-                await this.createNewStreak(message, todayKey, now, client);
+        const result = this.recordCheckIn(message.author.id);
+        if (!result) return;
+        const content = result.isNew
+            ? `¡Hola ${message.author.toString()}! Has empezado tu primera racha.`
+            : this.buildStreakMessage(
+                  message,
+                  result.streak,
+                  result.usedFreeze,
+                  result.newMilestones,
+              );
+        const results = await Promise.allSettled([
+            message.react('🔥'),
+            this.sendBotMessage(client, content, message.author.id),
+        ]);
+        for (const outcome of results)
+            if (outcome.status === 'rejected') {
+                client.logger.warn('Streak recorded but notification failed', {
+                    userId: message.author.id,
+                    error: outcome.reason,
+                });
             }
-        } catch (error) {
-            client.logger.error(`Error handling streak for ${userId}: ${error}`);
-        }
     }
 
-    private async updateExistingStreak(
-        message: Message,
-        userStreak: StreakRecord,
-        todayKey: string,
-        now: Date,
-        client: DiscordBot,
-    ) {
-        if (userStreak.lastStreakDate === todayKey) {
-            return;
-        }
-
-        const claimedMilestones = this.parseClaimedMilestones(userStreak.claimedMilestones);
-        const lastStreakDate = userStreak.lastStreakDate;
-        const lastStreakAt =
-            userStreak.lastStreakAt ?? this.dateFromLegacyValue(userStreak.lastStreakDate);
-
-        const isConsecutive = isConsecutiveDay(lastStreakDate, todayKey);
-        const maintainedByGrace = isWithinGracePeriod(lastStreakAt, now);
-
-        let usedFreeze = false;
-        let newStreak = 1;
-
-        if (isConsecutive || maintainedByGrace) {
-            newStreak = userStreak.streak + 1;
-        } else if (await this.consumeStreakFreeze(message.author.id)) {
-            usedFreeze = true;
-            newStreak = userStreak.streak + 1;
-        }
-
-        const currentHighest = userStreak.highestStreak || 0;
-        const highestStreak = Math.max(newStreak, currentHighest);
-        const newMilestones = getNewMilestones(newStreak, claimedMilestones);
-        const updatedClaimedMilestones = [...claimedMilestones, ...newMilestones];
-
-        await db
-            .update(streaks)
-            .set({
-                streak: newStreak,
-                highestStreak,
-                lastStreakDate: todayKey,
-                lastStreakAt: now,
-                claimedMilestones: updatedClaimedMilestones,
-            })
-            .where(eq(streaks.userId, message.author.id));
-
-        for (const milestone of newMilestones) {
-            await economyService.addBalance(message.author.id, MILESTONE_BONUSES[milestone]);
-        }
-
-        await message.react('🔥');
-        await this.sendBotMessage(
-            client,
-            this.buildStreakMessage(message, newStreak, usedFreeze, newMilestones),
-        );
-    }
-
-    private async createNewStreak(
-        message: Message,
-        todayKey: string,
-        now: Date,
-        client: DiscordBot,
-    ) {
-        const newMilestones = getNewMilestones(1, []);
-
-        await db.insert(streaks).values({
-            userId: message.author.id,
-            streak: 1,
-            highestStreak: 1,
-            lastStreakDate: todayKey,
-            lastStreakAt: now,
-            claimedMilestones: newMilestones,
-        });
-
-        await message.react('🔥');
-        await this.sendBotMessage(
-            client,
-            `¡Hola ${message.author.toString()}!\n\nHas empezado tu primera racha. Ahora cualquier mensaje significativo en canales generales cuenta como check-in diario.`,
+    recordCheckIn(userId: string, now = new Date()) {
+        const todayKey = getSpainDateKey(now);
+        return db.transaction(
+            (tx) => {
+                const previous = tx.select().from(streaks).where(eq(streaks.userId, userId)).get();
+                if (
+                    previous?.lastStreakDate === todayKey ||
+                    (previous?.lastStreakAt && previous.lastStreakAt > now)
+                )
+                    return null;
+                const claimed = this.parseClaimedMilestones(previous?.claimedMilestones);
+                let usedFreeze = false;
+                let streak = 1;
+                if (previous) {
+                    if (
+                        isConsecutiveDay(previous.lastStreakDate, todayKey) ||
+                        isWithinGracePeriod(previous.lastStreakAt, now)
+                    ) {
+                        streak = previous.streak + 1;
+                    } else {
+                        const slot = tx
+                            .select({ id: userInventory.id })
+                            .from(userInventory)
+                            .innerJoin(shopItems, eq(shopItems.id, userInventory.itemId))
+                            .where(
+                                and(
+                                    eq(userInventory.userId, userId),
+                                    eq(shopItems.value, STREAK_FREEZE_VALUE),
+                                ),
+                            )
+                            .orderBy(asc(userInventory.id))
+                            .limit(1)
+                            .get();
+                        if (slot) {
+                            tx.delete(userInventory).where(eq(userInventory.id, slot.id)).run();
+                            usedFreeze = true;
+                            streak = previous.streak + 1;
+                        }
+                    }
+                }
+                const newMilestones = getNewMilestones(streak, claimed);
+                const update = {
+                    streak,
+                    highestStreak: Math.max(streak, previous?.highestStreak ?? 0),
+                    lastStreakDate: todayKey,
+                    lastStreakAt: now,
+                    claimedMilestones: [...claimed, ...newMilestones],
+                };
+                tx.insert(streaks)
+                    .values({ userId, ...update })
+                    .onConflictDoUpdate({ target: streaks.userId, set: update })
+                    .run();
+                const reward = newMilestones.reduce(
+                    (total, milestone) => total + MILESTONE_BONUSES[milestone],
+                    0,
+                );
+                tx.insert(users)
+                    .values({ userId, points: reward })
+                    .onConflictDoUpdate({
+                        target: users.userId,
+                        set: { points: sql`${users.points} + ${reward}` },
+                    })
+                    .run();
+                return { isNew: !previous, streak, usedFreeze, newMilestones };
+            },
+            { behavior: 'immediate' },
         );
     }
 
@@ -136,34 +128,10 @@ export class StreakService {
         return lines.join('\n');
     }
 
-    private async consumeStreakFreeze(userId: string): Promise<boolean> {
-        const freezeItem = await db
-            .select()
-            .from(shopItems)
-            .where(eq(shopItems.value, STREAK_FREEZE_VALUE))
-            .get();
-
-        if (!freezeItem) return false;
-
-        const inventorySlots = await db
-            .select()
-            .from(userInventory)
-            .where(eq(userInventory.userId, userId))
-            .orderBy(asc(userInventory.acquiredAt))
-            .all();
-        const inventorySlot = inventorySlots.find((slot) => slot.itemId === freezeItem.id);
-
-        if (!inventorySlot) return false;
-
-        await db.delete(userInventory).where(eq(userInventory.id, inventorySlot.id));
-
-        return true;
-    }
-
-    private async sendBotMessage(client: DiscordBot, content: string) {
+    private async sendBotMessage(client: DiscordBot, content: string, userId: string) {
         const botChannel = client.channels.cache.get(BOT_CHANNEL_ID) as TextChannel;
         if (botChannel) {
-            await botChannel.send({ content });
+            await botChannel.send({ content, allowedMentions: { parse: [], users: [userId] } });
         }
     }
 
@@ -189,13 +157,15 @@ export class StreakService {
 
         if (!freezeItem) return 0;
 
-        const inventorySlots = await db
-            .select()
-            .from(userInventory)
-            .where(eq(userInventory.userId, userId))
-            .all();
-
-        return inventorySlots.filter((slot) => slot.itemId === freezeItem.id).length;
+        return (
+            db
+                .select({ value: count() })
+                .from(userInventory)
+                .where(
+                    and(eq(userInventory.userId, userId), eq(userInventory.itemId, freezeItem.id)),
+                )
+                .get()?.value ?? 0
+        );
     }
 
     private parseClaimedMilestones(value: unknown): number[] {
@@ -203,18 +173,6 @@ export class StreakService {
             return value.filter((item): item is number => typeof item === 'number');
         }
         return [];
-    }
-
-    private dateFromLegacyValue(value: string | null): Date | null {
-        if (!value) return null;
-
-        const unixSeconds = Number(value);
-        if (!Number.isNaN(unixSeconds)) {
-            return new Date(unixSeconds * 1000);
-        }
-
-        const parsed = new Date(`${value}T00:00:00+01:00`);
-        return Number.isNaN(parsed.getTime()) ? null : parsed;
     }
 }
 

@@ -1,6 +1,6 @@
 import db from '../../../database/db.js';
 import { shopItems, userInventory } from '../../../database/schema.js';
-import { eq, and, asc } from 'drizzle-orm';
+import { eq, and, asc, getTableColumns } from 'drizzle-orm';
 import economyService from './economyService.js';
 import {
     type ButtonInteraction,
@@ -11,12 +11,14 @@ import purchaseService, { type RoleDelivery } from './purchaseService.js';
 import { type Client } from 'discord.js';
 import { shopCatalog, type ShopItemConfig } from '../shopConfig.js';
 import logger from '../../../utils/logger.js';
+import { isSafeSelfAssignableRole } from '../../../shared/utils/roles.js';
 
 type ShopInteraction = ChatInputCommandInteraction | ButtonInteraction;
 
 const GENERIC_PURCHASE_ERROR = 'No pude completar la compra. No se ha cobrado el importe.';
 
 export class ShopService {
+    private seeded = false;
     async getShopItems() {
         // Updated to sort by price ascending
         return await db.select().from(shopItems).orderBy(asc(shopItems.price));
@@ -31,19 +33,12 @@ export class ShopService {
     }
 
     async getInventory(userId: string) {
-        const inventory = await db
-            .select()
+        return db
+            .select({ ...getTableColumns(shopItems), acquiredAt: userInventory.acquiredAt })
             .from(userInventory)
-            .where(eq(userInventory.userId, userId));
-
-        const enrichedInventory = [];
-        for (const slot of inventory) {
-            const item = await this.getItem(slot.itemId);
-            if (item) {
-                enrichedInventory.push({ ...item, acquiredAt: slot.acquiredAt });
-            }
-        }
-        return enrichedInventory;
+            .innerJoin(shopItems, eq(shopItems.id, userInventory.itemId))
+            .where(eq(userInventory.userId, userId))
+            .all();
     }
 
     async buyItem(
@@ -123,8 +118,7 @@ export class ShopService {
                 ]);
                 if (
                     !role ||
-                    role.managed ||
-                    !role.editable ||
+                    !isSafeSelfAssignableRole(role) ||
                     !bot.permissions.has(PermissionFlagsBits.ManageRoles) ||
                     role.comparePositionTo(bot.roles.highest) >= 0
                 ) {
@@ -228,53 +222,25 @@ export class ShopService {
     }
 
     async seedItems() {
-        // Sync DB with Config
-        const configNames = shopCatalog.map((i) => i.name);
-
-        // 1. Delete items not in config
-        const dbItems = await db.select().from(shopItems);
-        for (const dbItem of dbItems) {
-            if (!configNames.includes(dbItem.name)) {
-                await db.delete(shopItems).where(eq(shopItems.id, dbItem.id));
-                logger.info('Removed obsolete shop item', {
-                    itemId: dbItem.id,
-                    itemName: dbItem.name,
-                });
-            }
-        }
-
-        // 2. Upsert items from config
-        for (const configItem of shopCatalog) {
-            // Check if exists by name
-            const existing = await db
-                .select()
-                .from(shopItems)
-                .where(eq(shopItems.name, configItem.name))
-                .get();
-
-            if (existing) {
-                // Update properties if changed (price, description, value, emoji)
-                if (
-                    existing.price !== configItem.price ||
-                    existing.value !== configItem.value ||
-                    existing.emoji !== configItem.emoji
-                ) {
-                    await db
-                        .update(shopItems)
-                        .set({
-                            description: configItem.description,
-                            price: configItem.price,
-                            type: configItem.type,
-                            value: configItem.value,
-                            emoji: configItem.emoji,
-                        })
-                        .where(eq(shopItems.id, existing.id));
+        if (this.seeded) return;
+        db.transaction(
+            (tx) => {
+                const existing = tx.select().from(shopItems).all();
+                const byName = new Map(existing.map((item) => [item.name, item]));
+                const names = new Set(shopCatalog.map((item) => item.name));
+                for (const item of existing)
+                    if (!names.has(item.name))
+                        tx.delete(shopItems).where(eq(shopItems.id, item.id)).run();
+                for (const item of shopCatalog) {
+                    const current = byName.get(item.name);
+                    if (current)
+                        tx.update(shopItems).set(item).where(eq(shopItems.id, current.id)).run();
+                    else tx.insert(shopItems).values(item).run();
                 }
-            } else {
-                // Insert new
-                await db.insert(shopItems).values(configItem);
-            }
-        }
+            },
+            { behavior: 'immediate' },
+        );
+        this.seeded = true;
     }
 }
 

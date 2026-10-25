@@ -9,6 +9,7 @@ import {
     type TextChannel,
     type Guild,
     type Interaction,
+    type ModalSubmitInteraction,
     ModalBuilder,
     TextInputBuilder,
     TextInputStyle,
@@ -108,6 +109,7 @@ export class VerificationService {
     async handleInteraction(interaction: Interaction, client: DiscordBot) {
         if (
             !interaction.inGuild() ||
+            !interaction.guild ||
             !interaction.channel ||
             !('name' in interaction.channel) ||
             !interaction.channel.name.startsWith('verify-')
@@ -155,22 +157,33 @@ export class VerificationService {
         const answer = interaction.fields.getTextInputValue('captcha_input');
         if (answer.toUpperCase() === userState.answer.toUpperCase()) {
             userState.processing = true;
-            await this.handleSuccess(interaction, userState, userId, client);
+            await this.handleSuccess(
+                interaction as ModalSubmitInteraction<'cached'>,
+                userState,
+                userId,
+                client,
+            );
         } else {
             userState.challengeId = ''; // Consume before awaiting; stale modals cannot spend attempts.
-            await this.handleFailure(interaction, userState, userId, client);
+            await this.handleFailure(
+                interaction as ModalSubmitInteraction<'cached'>,
+                userState,
+                userId,
+                client,
+            );
         }
     }
 
     private async handleSuccess(
-        interaction: any,
-        userState: any,
+        interaction: ModalSubmitInteraction<'cached'>,
+        userState: VerificationState,
         userId: string,
         client: DiscordBot,
     ) {
         let verified = false;
         try {
-            if (interaction.member && 'roles' in interaction.member) {
+            await interaction.deferReply({ ephemeral: true });
+            if (interaction.member && !Array.isArray(interaction.member.roles)) {
                 await interaction.member.roles.remove(this.SUSPECT_ROLE_ID);
             } else {
                 throw new Error('Verification member is unavailable');
@@ -178,7 +191,7 @@ export class VerificationService {
             verified = true;
             userState.answer = '';
 
-            await interaction.reply({ content: '✅ **Verificado / Verified.**', ephemeral: true });
+            await interaction.editReply({ content: '✅ **Verificado / Verified.**' });
             await this.sendLog(
                 interaction.guild,
                 `🟢 **Verificación Exitosa:** <@${userId}>`,
@@ -193,7 +206,18 @@ export class VerificationService {
                 channelId: interaction.channelId,
                 error: err,
             });
-            if (interaction.isRepliable() && !interaction.replied && !interaction.deferred) {
+            if (interaction.deferred) {
+                await interaction
+                    .editReply({
+                        content: 'Error de permisos. Inténtalo de nuevo o contacta con el equipo.',
+                    })
+                    .catch((error: unknown) => {
+                        client.logger.warn('Failed to edit verification error response', {
+                            userId,
+                            error,
+                        });
+                    });
+            } else if (interaction.isRepliable() && !interaction.replied) {
                 await interaction
                     .reply({ content: 'Error de permisos.', ephemeral: true })
                     .catch((replyError: unknown) => {
@@ -213,18 +237,20 @@ export class VerificationService {
                     client,
                     'verification success',
                     3000,
-                    interaction.channel,
+                    interaction.channel as TextChannel,
                 );
             else userState.processing = false;
         }
     }
 
     private async handleFailure(
-        interaction: any,
-        userState: any,
+        interaction: ModalSubmitInteraction<'cached'>,
+        userState: VerificationState,
         userId: string,
         client: DiscordBot,
     ) {
+        // Acknowledge before logging, rendering a CAPTCHA, or making moderation requests.
+        await interaction.deferUpdate();
         userState.attempts++;
         const attemptsLeft = this.MAX_ATTEMPTS - userState.attempts;
         client.logger.info('Verification challenge failed', {
@@ -250,7 +276,10 @@ export class VerificationService {
                     `🚫 **Expulsado (Intentos):** <@${userId}> falló 3 veces.`,
                     client,
                 );
-                await interaction.reply({ content: '❌ **Expulsado / Kicked**', ephemeral: true });
+                await interaction.followUp({
+                    content: '❌ **Expulsado / Kicked**',
+                    ephemeral: true,
+                });
             } catch (e) {
                 client.logger.error('Verification max-attempt cleanup failed', {
                     userId,
@@ -258,9 +287,9 @@ export class VerificationService {
                     channelId: interaction.channelId,
                     error: e,
                 });
-                if (interaction.isRepliable() && !interaction.replied && !interaction.deferred) {
+                if (interaction.isRepliable()) {
                     await interaction
-                        .reply({
+                        .followUp({
                             content: 'No pude expulsar al usuario. Revisa permisos.',
                             ephemeral: true,
                         })
@@ -280,12 +309,11 @@ export class VerificationService {
                     client,
                     'verification failed max attempts',
                     3000,
-                    interaction.channel,
+                    interaction.channel as TextChannel,
                 );
             }
         } else {
             // Retry logic
-            await interaction.deferUpdate();
             try {
                 if (interaction.channel && interaction.channel.isTextBased()) {
                     const mainMsg = await interaction.channel.messages.fetch(userState.mainMsgId);
@@ -294,7 +322,7 @@ export class VerificationService {
                         attemptsLeft,
                         userState,
                     );
-                    await mainMsg.edit(newPayload as any);
+                    await mainMsg.edit(newPayload);
                     await interaction.followUp({
                         content: `❌ **Incorrecto / Incorrect.**`,
                         ephemeral: true,
@@ -316,7 +344,7 @@ export class VerificationService {
                         userState,
                     );
                     try {
-                        const newMsg = await interaction.channel.send(newPayload as any);
+                        const newMsg = await interaction.channel.send(newPayload);
                         userState.mainMsgId = newMsg.id;
                         this.state.set(userId, userState);
                     } catch (sendError) {
@@ -368,7 +396,12 @@ export class VerificationService {
         });
     }
 
-    private setupTimers(state: any, member: GuildMember, channel: TextChannel, client: DiscordBot) {
+    private setupTimers(
+        state: VerificationState,
+        member: GuildMember,
+        channel: TextChannel,
+        client: DiscordBot,
+    ) {
         const scheduleWarning = (ms: number, text: string) => {
             const tid = setTimeout(async () => {
                 try {
@@ -578,7 +611,7 @@ export class VerificationService {
         client: DiscordBot,
         reason: string,
         delayMs: number,
-        channel?: any,
+        channel?: TextChannel,
     ) {
         const state = this.state.get(userId, guildId);
         const channelId = state?.channelId ?? channel?.id;
@@ -598,7 +631,7 @@ export class VerificationService {
         client: DiscordBot,
         reason: string,
         delayMs: number,
-        channel?: any,
+        channel?: TextChannel,
     ) {
         const deleteChannel = async () => {
             await this.deleteVerificationChannel(channelId, client, reason, channel);
@@ -619,7 +652,7 @@ export class VerificationService {
         channelId: string,
         client: DiscordBot,
         reason: string,
-        channel?: any,
+        channel?: TextChannel,
     ) {
         try {
             const target =
@@ -641,7 +674,7 @@ export class VerificationService {
                 return;
             }
 
-            if (typeof target.delete !== 'function') {
+            if (!('delete' in target) || typeof target.delete !== 'function') {
                 client.logger.warn(
                     'Verification cleanup skipped because channel is not deletable',
                     {

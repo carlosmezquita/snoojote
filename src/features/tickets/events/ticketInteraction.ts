@@ -2,7 +2,7 @@ import {
     ActionRowBuilder,
     ComponentType,
     Events,
-    GuildMember,
+    type GuildMember,
     type Interaction,
     type ModalActionRowComponentBuilder,
     ModalBuilder,
@@ -101,6 +101,16 @@ export const execute = async (interaction: Interaction, client: DiscordBot) => {
             if (!interaction.channel || !interaction.channel.isTextBased()) return;
 
             await interaction.deferReply({ ephemeral: true });
+            const ticket = await ticketService.getTicketByChannel(interaction.channel.id);
+            const member = await getGuildMember(interaction);
+            if (
+                !ticket ||
+                !member ||
+                (!isTicketStaff(member) && ticket.userId !== interaction.user.id)
+            ) {
+                await interaction.editReply('No tienes permiso para cerrar este ticket.');
+                return;
+            }
 
             try {
                 const reason =
@@ -218,6 +228,7 @@ function closeTicketModal() {
 
 async function getGuildMember(interaction: Interaction): Promise<GuildMember | null> {
     if (!interaction.guild) return null;
-    if (interaction.member instanceof GuildMember) return interaction.member;
-    return await interaction.guild.members.fetch(interaction.user.id).catch(() => null);
+    return await interaction.guild.members
+        .fetch({ user: interaction.user.id, force: true })
+        .catch(() => null);
 }

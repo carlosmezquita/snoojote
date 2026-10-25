@@ -30,6 +30,7 @@ export const data = new SlashCommandBuilder()
     );
 
 export const execute = async (interaction: ChatInputCommandInteraction, client: DiscordBot) => {
+    await shopService.seedItems();
     const itemName = interaction.options.getString('rango');
 
     // If no item selected, show catalog
@@ -94,62 +95,31 @@ export const execute = async (interaction: ChatInputCommandInteraction, client: 
         ephemeral: true,
     });
 
-    const collector = response.createMessageComponentCollector({
-        componentType: ComponentType.Button,
-        time: 60000,
-    });
-
-    collector.on('collect', async (i) => {
-        if (i.customId === 'confirm_buy') {
-            await i.deferUpdate();
-
-            client.logger.info('Shop purchase confirmed by user', {
-                userId: interaction.user.id,
-                guildId: interaction.guildId,
-                itemName,
-            });
-            const result = await shopService.buyItem(i, itemName);
-
-            const resultEmbed = createEmbed(
-                result.success ? '¡Compra Exitosa!' : 'Error en la Compra',
-                result.message,
-                result.success ? Colors.Success : Colors.Error,
-            );
-
-            await interaction.editReply({
-                embeds: [resultEmbed],
-                components: [],
-            });
-        } else if (i.customId === 'cancel_buy') {
-            client.logger.info('Shop purchase cancelled by user', {
-                userId: interaction.user.id,
-                guildId: interaction.guildId,
-                itemName,
-            });
-            await i.update({
-                content: 'Compra cancelada.',
-                embeds: [],
-                components: [],
-            });
-        }
-    });
-
-    collector.on('end', async (collected) => {
-        if (collected.size === 0) {
-            try {
-                await interaction.editReply({
-                    content: 'Tiempo de espera agotado. Compra cancelada.',
-                    embeds: [],
-                    components: [],
-                });
-            } catch (e) {
-                client.logger.warn('Failed to update expired shop purchase confirmation', {
-                    userId: interaction.user.id,
-                    guildId: interaction.guildId,
-                    itemName,
-                    error: e,
-                });
-            }
-        }
-    });
+    let confirmation;
+    try {
+        confirmation = await response.awaitMessageComponent({
+            componentType: ComponentType.Button,
+            filter: (button) => button.user.id === interaction.user.id,
+            time: 60_000,
+        });
+    } catch {
+        await interaction.editReply({
+            content: 'Tiempo de espera agotado. Compra cancelada.',
+            embeds: [],
+            components: [],
+        });
+        return;
+    }
+    if (confirmation.customId !== 'confirm_buy') {
+        await confirmation.update({ content: 'Compra cancelada.', embeds: [], components: [] });
+        return;
+    }
+    await confirmation.deferUpdate();
+    const result = await shopService.buyItem(confirmation, itemName);
+    const resultEmbed = createEmbed(
+        result.success ? '¡Compra Exitosa!' : 'Error en la Compra',
+        result.message,
+        result.success ? Colors.Success : Colors.Error,
+    );
+    await interaction.editReply({ embeds: [resultEmbed], components: [] });
 };

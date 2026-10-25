@@ -1,3 +1,4 @@
+export const permissionLevel = 'admin' as const;
 import {
     SlashCommandBuilder,
     type ChatInputCommandInteraction,

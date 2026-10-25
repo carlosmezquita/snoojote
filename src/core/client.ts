@@ -1,18 +1,28 @@
-import { Client, Collection, GatewayIntentBits, Partials } from 'discord.js';
+import { Client, Collection, GatewayIntentBits, Partials, Options } from 'discord.js';
 import fs from 'fs';
 import path from 'path';
 import { fileURLToPath, pathToFileURL } from 'url';
 import logger from '../utils/logger.js';
+import { type Command } from './contracts.js';
 
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
 
 export class DiscordBot extends Client {
-    public commands: Collection<string, any>;
+    public commands: Collection<string, Command>;
     public logger: typeof logger;
 
     constructor() {
         super({
+            allowedMentions: { parse: [], repliedUser: false },
+            makeCache: Options.cacheWithLimits({
+                ...Options.DefaultMakeCacheSettings,
+                MessageManager: 100,
+            }),
+            sweepers: {
+                ...Options.DefaultSweeperSettings,
+                messages: { interval: 300, lifetime: 1800 },
+            },
             intents: [
                 GatewayIntentBits.Guilds,
                 GatewayIntentBits.GuildMessages,

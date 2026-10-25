@@ -35,7 +35,11 @@ void (async () => {
             const command = await import(fileUrl);
             const cmd = command.default || command;
 
-            if (cmd.data && cmd.execute) {
+            if (
+                typeof cmd.data?.name === 'string' &&
+                typeof cmd.data.toJSON === 'function' &&
+                typeof cmd.execute === 'function'
+            ) {
                 commands.push(cmd.data.toJSON());
 
                 if (cmd.aliases && Array.isArray(cmd.aliases)) {
@@ -46,7 +50,7 @@ void (async () => {
                     }
                 }
             } else {
-                logger.warn('Command module is missing data or execute property', { file });
+                throw new Error(`Invalid command module: ${file}`);
             }
         }
 
@@ -68,5 +72,6 @@ void (async () => {
         });
     } catch (error) {
         logger.error('Failed to deploy application commands', { error });
+        process.exitCode = 1;
     }
 })();

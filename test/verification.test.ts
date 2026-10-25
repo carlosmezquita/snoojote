@@ -71,6 +71,12 @@ async function fixture() {
             reply: async () => {
                 events.push('reply');
             },
+            deferReply: async () => {
+                events.push('defer');
+            },
+            editReply: async () => {
+                events.push('edit');
+            },
             showModal: async () => {
                 events.push('modal');
             },
@@ -123,6 +129,7 @@ describe('server-side verification challenges', () => {
         expect(f.events.filter((event) => event === 'role removed')).toHaveLength(1);
         expect(f.events.filter((event) => event === 'guildMemberVerified')).toHaveLength(1);
         expect(f.store.get('user', 'guild')).toBeUndefined();
+        expect(f.events.indexOf('defer')).toBeLessThan(f.events.indexOf('role removed'));
     });
 
     for (const [label, overrides] of [

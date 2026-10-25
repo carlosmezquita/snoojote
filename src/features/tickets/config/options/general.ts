@@ -18,7 +18,6 @@ export const generalTicket: TicketOptionConfig = {
     buttonStyle: ButtonStyle.Secondary,
 
     adminRoles: [config.roles.support, config.roles.mod],
-    readOnlyRoles: [],
 
     channelPrefix: 'asistencia-',
     categoryId: config.channels.ticketCategory,
@@ -30,7 +29,6 @@ export const generalTicket: TicketOptionConfig = {
     color: 'Blue',
 
     enableDmOnOpen: true,
-    autoCloseHours: 48,
 
     pingHere: false,
     pingEveryone: false,
