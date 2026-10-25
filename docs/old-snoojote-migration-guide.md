@@ -20,7 +20,7 @@ Keep the backup until the new bot has run cleanly for at least a few days.
 
 ## 2. Install Runtime and Dependencies
 
-Install Bun 1.3.13 or newer, then install this repo:
+Install Bun 1.4.4 or newer, then install this repo:
 
 ```bash
 bun install
@@ -56,22 +56,22 @@ On Windows PowerShell:
 Copy-Item .env.example .env
 ```
 
-Fill in the values from the old bot:
+Keep only `TOKEN` and optional `GROQ_API_KEY` in `.env`. Copy `config/bot.config.example.json` to `config/bot.config.json`; map the old non-secret settings to these JSON paths:
 
-| New variable                | Old source                                                                      |
-| --------------------------- | ------------------------------------------------------------------------------- |
-| `TOKEN`                     | old `.env` `TOKEN`, or `config.json` `token.value` if `token.fromENV` was false |
-| `DISCORD_CLIENT_ID`         | Discord Developer Portal application/client ID                                  |
-| `DISCORD_GUILD_ID`          | old `config.json` `serverId`, if you want fast guild command deploys            |
-| `CHANNEL_STREAKS`           | old `config.json` `channels.streaksChannel`                                     |
-| `CHANNEL_BOT`               | old `config.json` `channels.botChannel`                                         |
-| `CHANNEL_TICKET_CATEGORY`   | old ticket option `category` values, usually the main ticket category           |
-| `CHANNEL_TRANSCRIPTS`       | old `transcriptconfig.json` `sendTranscripts.channel`                           |
-| `MAX_OPEN_TICKETS_PER_USER` | old `config.json` `system.maxAmountOfTickets`                                   |
-| `ROLE_SUPPORT`              | old support/admin ticket roles                                                  |
-| `ROLE_MOD`                  | moderation staff role                                                           |
-| `ROLE_SUSPECT`              | verification/suspect role                                                       |
-| `ROLE_RPLACE`               | r/place role, if still used                                                     |
+| New variable                            | Old source                                                                      |
+| --------------------------------------- | ------------------------------------------------------------------------------- |
+| `TOKEN`                                 | old `.env` `TOKEN`, or `config.json` `token.value` if `token.fromENV` was false |
+| `discord.clientId`                      | Discord Developer Portal application/client ID                                  |
+| `discord.guildId`                       | old `config.json` `serverId`, if you want fast guild command deploys            |
+| `channels.streaks / streaks.channelIds` | old `config.json` `channels.streaksChannel`                                     |
+| `channels.bot`                          | old `config.json` `channels.botChannel`                                         |
+| `channels.ticketCategory`               | old ticket option `category` values, usually the main ticket category           |
+| `channels.transcripts`                  | old `transcriptconfig.json` `sendTranscripts.channel`                           |
+| `tickets.maxOpenPerUser`                | old `config.json` `system.maxAmountOfTickets`                                   |
+| `roles.support`                         | old support/admin ticket roles                                                  |
+| `roles.mod`                             | moderation staff role                                                           |
+| `roles.suspect`                         | verification/suspect role                                                       |
+| `roles.rPlace`                          | r/place role, if still used                                                     |
 
 The old bot had ticket options inline in `config.json`. In this bot they live in:
 
@@ -90,13 +90,13 @@ The new bot stores data in:
 data/database.sqlite
 ```
 
-Create/apply the schema:
+For a new database, create the schema (see [MIGRATIONS.md](../MIGRATIONS.md) for existing databases):
 
 ```bash
-bunx drizzle-kit push
+bunx drizzle-kit migrate
 ```
 
-This is required before first production start and after pulling migrations.
+The correct schema is required before first production start and after pulling migrations.
 
 ## 6. Migrate Streaks
 
@@ -154,7 +154,7 @@ After `.env` is complete and the database schema exists:
 bun run deploy
 ```
 
-If `DISCORD_GUILD_ID` is set, commands deploy to that guild quickly. Without it, commands deploy globally and may take longer to appear.
+Set `discord.guildId` to the community server. This bot is single-guild; runtime configuration requires that ID.
 
 ## 9. Production Cutover
 
@@ -166,7 +166,7 @@ Use a short maintenance window:
 4. Pull the new version on the server.
 5. Run `bun install`.
 6. Run `bun run check`.
-7. Run `bunx drizzle-kit push`.
+7. Apply the appropriate schema upgrade from `MIGRATIONS.md`.
 8. Run `bun run deploy`.
 9. Start the new bot with `bun run start` or your process manager.
 
@@ -177,7 +177,7 @@ Verify these before considering the migration complete:
 - Bot logs in without missing-env or intent errors.
 - `/ticketpanel` sends the ticket panel.
 - A test ticket can be opened, claimed, closed with reason, reopened, and deleted.
-- Transcript is sent to `CHANNEL_TRANSCRIPTS`.
+- Transcript is sent to `channels.transcripts`.
 - Verification creates and deletes its temporary text channel.
 - The daily question scheduler logs startup and does not double-send for the same Spain date.
 - `/daily` shows the progressive reward.

@@ -5,7 +5,7 @@ This guide migrates the bot from env-heavy configuration and uncapped passive re
 ## 1. Update the branch and install
 
 ```bash
-git switch codex/economy-config-balance
+git switch main
 bun install
 ```
 
@@ -32,7 +32,7 @@ Edit `config/bot.config.json`. This file is ignored by Git.
 
 Required production values:
 
-- `discord.clientId`
+- `discord.clientId` and `discord.guildId`
 - all required `channels.*` IDs
 - required `roles.*` IDs
 - `economy.shopCatalog[*].value` for every role item
@@ -40,7 +40,6 @@ Required production values:
 
 Optional but useful:
 
-- `discord.guildId` for fast guild command deployment
 - `channels.transcripts`; defaults to `channels.logs` if omitted
 - `economy.questExcludedChannelIds` for channels that must not count for daily tasks
 
@@ -58,7 +57,7 @@ Excluded channels are not selected for message quests, and voice minutes in excl
 
 ## 5. Apply database migration
 
-Deploy the new Drizzle migration before running the updated bot in production:
+Follow [MIGRATIONS.md](../MIGRATIONS.md) to select the correct path for the existing database. For a new or journaled database:
 
 ```bash
 bunx drizzle-kit migrate
@@ -80,5 +79,5 @@ Startup will fail if `config/bot.config.json` still contains required placeholde
 - `/daily` shows progress, guidelines, and excluded channels.
 - Message quests only progress in allowed channels.
 - Voice quests progress after full minutes when users leave, switch voice channels, or run `/daily` while still connected.
-- Users receive a non-sensitive completion notification when a voice daily quest completes; if their DMs are closed, the bot posts it in the bot channel.
+- Users receive a non-sensitive completion notification when a voice daily quest completes; if their DMs are closed, the bot posts a generic notice in the bot channel without exposing private details.
 - `/tienda` shows configured prices and `/comprar` enforces rank order.

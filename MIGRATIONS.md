@@ -5,7 +5,9 @@ and migration journal. The application database is `data/database.sqlite`.
 
 ## Applying Schema Changes
 
-Stop the bot and back up the database before changing its schema. Run one bot process per
+Stop the bot and back up the database before changing its schema. With WAL mode, use SQLite’s
+backup API/CLI or stop cleanly and confirm the WAL is checkpointed; copying only the main file
+while uncheckpointed WAL data remains is not a complete backup. Run one bot process per
 database; the Discord workflows and recovery workers assume that deployment model.
 
 ```bash
@@ -52,6 +54,21 @@ A creating ticket reserves capacity before Discord channel creation. Its channel
 Failed cleanup retains `creation_failed` state and capacity until deletion is confirmed. Recovery
 runs at startup and every five minutes. Preserve the topic marker while creation is pending.
 
-Transcripts fetch the full history and fail explicitly if a page cannot be fetched; attachment
-size remains subject to Discord's limits. Verification sessions are held in memory, so they do
+Transcripts paginate history with an 8 MiB / 10,000-message export budget. Failed or oversized
+exports preserve the ticket for manual export; closure and deletion require an available archive
+channel. Discord attachment limits can still reject an upload. Verification sessions are held in memory, so they do
 not survive a restart. Existing stale-channel cleanup handles abandoned verification channels.
+
+## Runtime Invariants Update
+
+Migration `0011_runtime_invariants.sql` normalizes legacy text inventory timestamps to Unix seconds,
+adds indexes for answered-ticket history, and requires currency balances to be nonnegative safe
+integers. It drops the obsolete economy/shop lock tables; coordination now uses synchronous SQLite
+transactions and the purchase journal. It does not discard balances, inventory, or ticket history.
+
+The balance constraint deliberately fails an upgrade if legacy balances are invalid. Investigate
+and repair those records on a backup before retrying; do not silently reset user balances. Test the
+upgrade against a copy of the production database first. Existing `drizzle-kit push` databases should
+review the generated table-rebuild plan and normalize text `user_inventory.acquired_at` values to
+Unix seconds before changing that column; the SQL migration performs this conversion for journaled
+databases.
