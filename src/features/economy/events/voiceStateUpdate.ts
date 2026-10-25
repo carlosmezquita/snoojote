@@ -3,6 +3,7 @@ import economyService from '../services/economyService.js';
 import questService, { QuestType } from '../services/questService.js';
 import { config } from '../../../config.js';
 import voiceSessionService from '../services/voiceSessionService.js';
+import { getSpainDateKey } from '../../streaks/services/streakRules.js';
 import { DMService } from '../../../shared/services/DMService.js';
 
 export default {
@@ -27,19 +28,19 @@ export default {
             return;
         }
 
-        if (isSwitching) {
-            const elapsed = voiceSessionService.switchChannel(userId, newChannelId, now);
-            await applyVoiceMinutes(userId, elapsed?.channelId, elapsed?.minutes ?? 0, newState);
-
-            if (questService.isExcludedQuestChannel(newChannelId)) {
-                voiceSessionService.stop(userId, now);
-            }
-            return;
-        }
-
-        if (isLeaving) {
-            const elapsed = voiceSessionService.stop(userId, now);
-            await applyVoiceMinutes(userId, elapsed?.channelId, elapsed?.minutes ?? 0, oldState);
+        if (isSwitching || isLeaving) {
+            const elapsed = voiceSessionService.collectDated(userId, now, true);
+            // Settle the session before awaiting SQL/Discord so another gateway event cannot lose it.
+            if (newChannelId && !questService.isExcludedQuestChannel(newChannelId))
+                voiceSessionService.start(userId, newChannelId, now);
+            for (const slice of elapsed)
+                await applyVoiceMinutes(
+                    userId,
+                    slice.channelId,
+                    slice.minutes,
+                    newState,
+                    slice.earnedAt,
+                );
         }
     },
 };
@@ -49,6 +50,7 @@ export async function applyVoiceMinutes(
     channelId: string | null | undefined,
     durationMinutes: number,
     state: VoiceState,
+    earnedAt = new Date(),
 ): Promise<void> {
     if (durationMinutes < 1 || questService.isExcludedQuestChannel(channelId)) return;
 
@@ -59,9 +61,11 @@ export async function applyVoiceMinutes(
             'VOICE',
             reward,
             config.economy.voiceRewards.dailyCap,
+            earnedAt,
         );
     }
 
+    if (getSpainDateKey(earnedAt) !== getSpainDateKey(new Date())) return;
     const quest = await economyService.getDailyQuest(userId, state.client as any);
     if (!quest || quest.isCompleted || quest.type !== QuestType.VOICE_TIME) return;
 

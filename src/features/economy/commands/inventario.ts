@@ -25,7 +25,11 @@ export const execute = async (interaction: ChatInputCommandInteraction, client: 
             })
             .join('\n');
 
-        embed.setDescription(description);
+        embed.setDescription(
+            description.length > 4000
+                ? `${description.slice(0, 3950)}\n…Inventario truncado.`
+                : description,
+        );
     }
 
     await interaction.reply({ embeds: [embed], ephemeral: true });

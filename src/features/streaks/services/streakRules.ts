@@ -9,14 +9,14 @@ export const MILESTONE_BONUSES: Record<number, number> = Object.fromEntries(
     Object.entries(config.economy.milestoneBonuses).map(([days, bonus]) => [Number(days), bonus]),
 );
 
-export function getSpainDateKey(date: Date): string {
-    const formatter = new Intl.DateTimeFormat('en-CA', {
-        timeZone: STREAK_TIME_ZONE,
-        year: 'numeric',
-        month: '2-digit',
-        day: '2-digit',
-    });
+const formatter = new Intl.DateTimeFormat('en-CA', {
+    timeZone: STREAK_TIME_ZONE,
+    year: 'numeric',
+    month: '2-digit',
+    day: '2-digit',
+});
 
+export function getSpainDateKey(date: Date): string {
     const parts = Object.fromEntries(
         formatter
             .formatToParts(date)
@@ -45,7 +45,8 @@ export function isConsecutiveDay(
 
 export function isWithinGracePeriod(lastStreakAt: Date | null | undefined, now: Date): boolean {
     if (!lastStreakAt) return false;
-    return now.getTime() - lastStreakAt.getTime() <= STREAK_GRACE_PERIOD_MS;
+    const elapsed = now.getTime() - lastStreakAt.getTime();
+    return elapsed >= 0 && elapsed <= STREAK_GRACE_PERIOD_MS;
 }
 
 export function getDailyReward(streakDays: number): number {

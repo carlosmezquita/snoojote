@@ -1,7 +1,7 @@
 import { afterEach, describe, expect, test } from 'bun:test';
-import { and, eq, inArray, like } from 'drizzle-orm';
+import { and, eq, inArray } from 'drizzle-orm';
 import db from '../src/database/db.js';
-import { economyDailyEarnings, economyTransactionLocks, users } from '../src/database/schema.js';
+import { economyDailyEarnings, users } from '../src/database/schema.js';
 import economyService, {
     calculateCappedEarning,
 } from '../src/features/economy/services/economyService.js';
@@ -33,10 +33,6 @@ afterEach(() => {
         db.delete(economyDailyEarnings).where(inArray(economyDailyEarnings.userId, userIds)).run();
         db.delete(users).where(inArray(users.userId, userIds)).run();
     }
-
-    db.delete(economyTransactionLocks)
-        .where(like(economyTransactionLocks.lockKey, `%${testRunId}%`))
-        .run();
 
     testUserIds.clear();
 });
