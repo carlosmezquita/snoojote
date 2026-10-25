@@ -18,7 +18,6 @@ export const spamTicket: TicketOptionConfig = {
     buttonStyle: ButtonStyle.Secondary,
 
     adminRoles: [config.roles.mod, config.roles.support],
-    readOnlyRoles: [],
 
     channelPrefix: 'spam-',
     categoryId: config.channels.ticketCategory,
@@ -30,7 +29,6 @@ export const spamTicket: TicketOptionConfig = {
     color: 'Red',
 
     enableDmOnOpen: true,
-    autoCloseHours: 24,
 
     pingHere: false,
     pingEveryone: false,

@@ -10,12 +10,10 @@ export interface TicketOptionConfig {
 
     // Permission settings
     adminRoles: string[];
-    readOnlyRoles: string[];
 
     // Channel settings
     channelPrefix: string;
     categoryId: string;
-    closedCategoryId?: string;
 
     // Messages
     openMessage: string;
@@ -28,7 +26,6 @@ export interface TicketOptionConfig {
 
     // Features
     enableDmOnOpen: boolean;
-    autoCloseHours?: number;
 
     // Pings
     pingHere: boolean;

@@ -19,10 +19,11 @@ import {
     formatDuration,
 } from './waitTimeEstimator.js';
 import logger from '../../../utils/logger.js';
+import { SingleFlight } from '../../../shared/services/SingleFlight.js';
 import { getTicketStaffRoleIds, isTicketStaff } from '../utils/ticketStaff.js';
 
 // ---------------------------------------------------------------------------
-// In-memory cache for guild.members.fetch() — short TTL
+// Gateway membership bootstrap and short-lived availability snapshots
 // ---------------------------------------------------------------------------
 
 interface StaffCacheEntry {
@@ -70,7 +71,25 @@ const timeZoneFormatter = new Intl.DateTimeFormat('en-US', {
     hourCycle: 'h23',
 });
 
+type ResponseHistoryRow = Pick<
+    typeof tickets.$inferSelect,
+    | 'createdAt'
+    | 'firstResponseAt'
+    | 'staffCapacityAtCreation'
+    | 'openTicketsAtCreation'
+    | 'unansweredTicketsAtCreation'
+>;
 export class ResponseTimeService {
+    private historyCache?: {
+        expiresAt: number;
+        recentRows: ResponseHistoryRow[];
+        historicalRows: ResponseHistoryRow[];
+    };
+
+    private readonly loadedGuilds = new Set<string>();
+    private readonly capacityLoads = new SingleFlight<string, StaffCacheEntry>();
+    private readonly memberLoads = new SingleFlight<string, void>();
+    private readonly bootstrapRetryAt = new Map<string, number>();
     /**
      * Records the time of the first response to a ticket by a staff member.
      * Only updates if firstResponseAt is currently null.
@@ -81,38 +100,56 @@ export class ResponseTimeService {
         timestamp: Date,
         messageId?: string,
     ): Promise<void> {
-        const ticket = await db.select().from(tickets).where(eq(tickets.id, ticketId)).get();
-        if (!ticket) return;
+        db.transaction(
+            (tx) => {
+                const ticket = tx.select().from(tickets).where(eq(tickets.id, ticketId)).get();
+                if (!ticket || ticket.status !== 'open' || !isFiniteDate(timestamp)) return;
+                if (
+                    messageId &&
+                    tx
+                        .select({ id: ticketStaffActivity.id })
+                        .from(ticketStaffActivity)
+                        .where(
+                            and(
+                                eq(ticketStaffActivity.ticketId, ticketId),
+                                eq(ticketStaffActivity.messageId, messageId),
+                            ),
+                        )
+                        .limit(1)
+                        .get()
+                )
+                    return;
+                let responseTimeMs: number | null = null;
+                if (!ticket.firstResponseAt) {
+                    responseTimeMs = Math.max(timestamp.getTime() - ticket.createdAt.getTime(), 0);
+                    tx.update(tickets)
+                        .set({ firstResponseAt: timestamp, firstResponseBy: staffId })
+                        .where(eq(tickets.id, ticketId))
+                        .run();
+                    historicalLoadCache = null;
+                    this.historyCache = undefined;
+                }
+                tx.insert(ticketStaffActivity)
+                    .values({
+                        ticketId,
+                        staffId,
+                        action: 'message',
+                        messageId,
+                        occurredAt: timestamp,
+                        responseTimeMs,
+                    })
+                    .run();
+                enrichedStaffProfileCache.clear();
+            },
+            { behavior: 'immediate' },
+        );
+    }
 
-        let responseTimeMs: number | null = null;
-
-        if (!ticket.firstResponseAt) {
-            const candidateResponseTimeMs = isFiniteDate(ticket.createdAt)
-                ? Math.max(timestamp.getTime() - ticket.createdAt.getTime(), 0)
-                : null;
-
-            const updatedTicket = await db
-                .update(tickets)
-                .set({ firstResponseAt: timestamp, firstResponseBy: staffId })
-                .where(and(eq(tickets.id, ticketId), isNull(tickets.firstResponseAt)))
-                .returning({ id: tickets.id })
-                .get();
-
-            if (updatedTicket) {
-                responseTimeMs = candidateResponseTimeMs;
-                historicalLoadCache = null;
-            }
-        }
-
-        await db.insert(ticketStaffActivity).values({
-            ticketId,
-            staffId,
-            action: 'message',
-            messageId,
-            occurredAt: timestamp,
-            responseTimeMs,
-        });
-        enrichedStaffProfileCache.clear();
+    invalidateGuild(guildId: string) {
+        this.loadedGuilds.delete(guildId);
+        this.bootstrapRetryAt.delete(guildId);
+        staffCache.delete(guildId);
+        enrichedStaffProfileCache.delete(guildId);
     }
 
     async getActiveStaffCount(
@@ -150,10 +187,24 @@ export class ResponseTimeService {
         guild: Guild,
         options: { forceRefresh?: boolean } = {},
     ): Promise<StaffCacheEntry> {
+        return this.capacityLoads.run(
+            `${guild.id}:${options.forceRefresh ? 'force' : 'normal'}`,
+            () => this.computeStaffCapacity(guild, options),
+        );
+    }
+
+    private async computeStaffCapacity(
+        guild: Guild,
+        options: { forceRefresh?: boolean },
+    ): Promise<StaffCacheEntry> {
         const cacheKey = guild.id;
         const cached = staffCache.get(cacheKey);
 
-        if (!options.forceRefresh && cached && Date.now() - cached.fetchedAt < STAFF_CACHE_TTL_MS) {
+        if (
+            cached &&
+            ((this.bootstrapRetryAt.get(guild.id) ?? 0) > Date.now() ||
+                (!options.forceRefresh && Date.now() - cached.fetchedAt < STAFF_CACHE_TTL_MS))
+        ) {
             return { ...cached, fromCache: true };
         }
 
@@ -162,13 +213,23 @@ export class ResponseTimeService {
         let members;
         try {
             // Requires the GuildPresences intent to avoid undercounting active staff.
-            members = await guild.members.fetch({ withPresences: true });
-        } catch {
+            await this.memberLoads.run(guild.id, async () => {
+                if (this.loadedGuilds.has(guild.id)) return;
+                await guild.members.fetch({ withPresences: true });
+                this.loadedGuilds.add(guild.id);
+                this.bootstrapRetryAt.delete(guild.id);
+            });
+            members = guild.members.cache;
+        } catch (error) {
+            logger.warn('Staff membership bootstrap failed', { guildId: guild.id, error });
+            this.bootstrapRetryAt.set(guild.id, Date.now() + STAFF_CACHE_TTL_MS);
             if (cached) {
                 return { ...cached, fromCache: true };
             }
 
-            return emptyStaffCapacity(staffRoleIds);
+            const empty = emptyStaffCapacity(staffRoleIds);
+            staffCache.set(cacheKey, empty);
+            return empty;
         }
 
         const missingRoleIds = staffRoleIds.filter((roleId) => !guild.roles.cache.has(roleId));
@@ -257,18 +318,7 @@ export class ResponseTimeService {
         const now = new Date();
 
         // Recent baseline: last 20 answered tickets.
-        const recentRows = await db
-            .select({
-                createdAt: tickets.createdAt,
-                firstResponseAt: tickets.firstResponseAt,
-                staffCapacityAtCreation: tickets.staffCapacityAtCreation,
-                openTicketsAtCreation: tickets.openTicketsAtCreation,
-            })
-            .from(tickets)
-            .where(isNotNull(tickets.firstResponseAt))
-            .orderBy(desc(tickets.createdAt))
-            .limit(20)
-            .all();
+        const { recentRows, historicalRows } = this.readResponseHistory(now);
 
         const recentTickets: TicketResponseData[] = recentRows
             .filter(
@@ -282,6 +332,7 @@ export class ResponseTimeService {
                 firstResponseAt: r.firstResponseAt!,
                 staffCapacityAtCreation: r.staffCapacityAtCreation,
                 openTicketsAtCreation: r.openTicketsAtCreation,
+                unansweredTicketsAtCreation: r.unansweredTicketsAtCreation,
             }));
 
         // Temporal baseline: same day-of-week + 4-hour block, last 60 days.
@@ -290,25 +341,13 @@ export class ResponseTimeService {
         const currentDay = currentParts.weekday;
         const currentBlock = getTimeBlock(currentParts.hour);
 
-        const historicalRows = await db
-            .select({
-                createdAt: tickets.createdAt,
-                firstResponseAt: tickets.firstResponseAt,
-                staffCapacityAtCreation: tickets.staffCapacityAtCreation,
-                openTicketsAtCreation: tickets.openTicketsAtCreation,
-            })
-            .from(tickets)
-            .where(
-                and(isNotNull(tickets.firstResponseAt), gte(tickets.firstResponseAt, sixtyDaysAgo)),
-            )
-            .all();
-
         // Filter in-app for matching day-of-week + time block
         // (SQLite timestamp mode makes SQL-level day/hour extraction impractical)
         const temporalTickets: TicketResponseData[] = historicalRows
             .filter((r) => {
                 if (
                     !isFiniteDate(r.createdAt) ||
+                    r.createdAt < sixtyDaysAgo ||
                     !r.firstResponseAt ||
                     !isFiniteDate(r.firstResponseAt)
                 ) {
@@ -323,6 +362,7 @@ export class ResponseTimeService {
                 firstResponseAt: r.firstResponseAt!,
                 staffCapacityAtCreation: r.staffCapacityAtCreation,
                 openTicketsAtCreation: r.openTicketsAtCreation,
+                unansweredTicketsAtCreation: r.unansweredTicketsAtCreation,
             }));
 
         const allTickets: TicketResponseData[] = historicalRows
@@ -337,11 +377,16 @@ export class ResponseTimeService {
                 firstResponseAt: r.firstResponseAt!,
                 staffCapacityAtCreation: r.staffCapacityAtCreation,
                 openTicketsAtCreation: r.openTicketsAtCreation,
+                unansweredTicketsAtCreation: r.unansweredTicketsAtCreation,
             }));
 
         const queueLength = queueLengthOverride ?? (await this.getUnansweredQueueLength());
         const staffCapacity = await this.getStaffCapacity(guild, options);
-        const staffProfiles = await this.enrichStaffProfiles(staffCapacity.staffProfiles, now);
+        const staffProfiles = await this.enrichStaffProfiles(
+            staffCapacity.staffProfiles,
+            now,
+            guild.id,
+        );
 
         const estimate = estimateWaitTime({
             recentTickets,
@@ -371,6 +416,38 @@ export class ResponseTimeService {
         });
 
         return estimate;
+    }
+
+    private readResponseHistory(now: Date) {
+        if (this.historyCache && this.historyCache.expiresAt > Date.now()) return this.historyCache;
+        const projection = {
+            createdAt: tickets.createdAt,
+            firstResponseAt: tickets.firstResponseAt,
+            staffCapacityAtCreation: tickets.staffCapacityAtCreation,
+            openTicketsAtCreation: tickets.openTicketsAtCreation,
+            unansweredTicketsAtCreation: tickets.unansweredTicketsAtCreation,
+        };
+        const recentRows = db
+            .select(projection)
+            .from(tickets)
+            .where(isNotNull(tickets.firstResponseAt))
+            .orderBy(desc(tickets.createdAt))
+            .limit(20)
+            .all();
+        const historicalRows = db
+            .select(projection)
+            .from(tickets)
+            .where(
+                and(
+                    isNotNull(tickets.firstResponseAt),
+                    gte(tickets.firstResponseAt, new Date(now.getTime() - 60 * 86_400_000)),
+                ),
+            )
+            .orderBy(desc(tickets.firstResponseAt))
+            .limit(5000)
+            .all();
+        this.historyCache = { expiresAt: Date.now() + 30_000, recentRows, historicalRows };
+        return this.historyCache;
     }
 
     async recordEstimateSnapshot(ticketId: number, estimate: EstimationResult): Promise<void> {
@@ -408,11 +485,12 @@ export class ResponseTimeService {
     private async enrichStaffProfiles(
         staffProfiles: StaffResponseProfile[],
         now: Date,
+        guildId: string,
     ): Promise<StaffResponseProfile[]> {
         if (staffProfiles.length === 0) return [];
 
         const staffIds = staffProfiles.map((staff) => staff.staffId);
-        const cacheKey = [...staffIds].sort().join(':');
+        const cacheKey = guildId;
         const cached = enrichedStaffProfileCache.get(cacheKey);
 
         if (cached && Date.now() - cached.fetchedAt < PROFILE_CACHE_TTL_MS) {
@@ -505,16 +583,16 @@ export class ResponseTimeService {
         const loads = tickets
             .map((ticket) => {
                 if (
-                    ticket.openTicketsAtCreation == null ||
+                    ticket.unansweredTicketsAtCreation == null ||
                     ticket.staffCapacityAtCreation == null ||
-                    !Number.isFinite(ticket.openTicketsAtCreation) ||
+                    !Number.isFinite(ticket.unansweredTicketsAtCreation) ||
                     !Number.isFinite(ticket.staffCapacityAtCreation)
                 ) {
                     return null;
                 }
 
                 return (
-                    (Math.max(ticket.openTicketsAtCreation, 0) + 1) /
+                    (Math.max(ticket.unansweredTicketsAtCreation, 0) + 1) /
                     Math.max(ticket.staffCapacityAtCreation, EPSILON_STAFF_CAPACITY)
                 );
             })

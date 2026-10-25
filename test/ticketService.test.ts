@@ -242,3 +242,134 @@ describe('complete ticket transcripts', () => {
         );
     });
 });
+
+describe('ticket lifecycle safety', () => {
+    function lifecycleFixture() {
+        const f = fixture();
+        const id = randomUUID();
+        db.insert(tickets).values({ userId: f.user.id, channelId: id, status: 'open' }).run();
+        let archives = 0;
+        let deletes = 0;
+        let archiveAvailable = true;
+        let deletionFails = false;
+        let permissionFails = false;
+        const channel = {
+            id,
+            name: 'ticket',
+            guild: { name: 'guild' },
+            messages: { fetch: async () => new Collection() },
+            client: {
+                channels: {
+                    fetch: async () =>
+                        archiveAvailable
+                            ? {
+                                  isTextBased: () => true,
+                                  send: async () => {
+                                      archives++;
+                                      await new Promise(setImmediate);
+                                  },
+                              }
+                            : null,
+                },
+                users: { fetch: async () => null },
+            },
+            permissionOverwrites: {
+                edit: async () => {
+                    if (permissionFails) throw new Error('Missing overwrite permission');
+                },
+            },
+            send: async () => {},
+            delete: async () => {
+                if (deletionFails) throw new Error('Missing permissions');
+                deletes++;
+            },
+        } as unknown as TextChannel;
+        return {
+            ...f,
+            channel,
+            archives: () => archives,
+            deletes: () => deletes,
+            unavailable: () => {
+                archiveAvailable = false;
+            },
+            failPermission: () => {
+                permissionFails = true;
+            },
+            failDelete: () => {
+                deletionFails = true;
+            },
+        };
+    }
+
+    test('concurrent close requests across instances archive and close once', async () => {
+        const f = lifecycleFixture();
+        await Promise.all(
+            Array.from({ length: 20 }, () => f.service().closeTicket(f.channel, f.user)),
+        );
+        expect(f.archives()).toBe(1);
+        expect(f.rows()[0].status).toBe('closed');
+    });
+
+    test('an unavailable archive preserves the ticket for close and delete retries', async () => {
+        const f = lifecycleFixture();
+        f.unavailable();
+        await expect(f.service().closeTicket(f.channel, f.user)).rejects.toThrow('preserved');
+        await expect(f.service().deleteTicket(f.channel, f.user)).rejects.toThrow('preserved');
+        expect(f.rows()[0].status).toBe('open');
+        expect(f.deletes()).toBe(0);
+    });
+
+    test('Discord deletion failure leaves a retryable record', async () => {
+        const f = lifecycleFixture();
+        f.failDelete();
+        await expect(f.service().deleteTicket(f.channel, f.user)).rejects.toThrow(
+            'Missing permissions',
+        );
+        expect(f.rows()[0].status).toBe('open');
+        expect(f.rows()[0].deletedAt).toBeNull();
+        expect(f.archives()).toBe(1);
+    });
+
+    test('failed channel permission changes do not report a completed close or reopen', async () => {
+        const f = lifecycleFixture();
+        f.failPermission();
+        await expect(f.service().closeTicket(f.channel, f.user)).rejects.toThrow(
+            'Missing overwrite',
+        );
+        expect(f.rows()[0].status).toBe('open');
+        db.update(tickets)
+            .set({ status: 'closed' })
+            .where(eq(tickets.channelId, f.channel.id))
+            .run();
+        await expect(f.service().reopenTicket(f.channel, f.user)).rejects.toThrow(
+            'Missing overwrite',
+        );
+        expect(f.rows()[0].status).toBe('closed');
+    });
+
+    test('oversized transcripts fail without silently truncating content', async () => {
+        let fetches = 0;
+        const channel = {
+            name: 'huge-ticket',
+            messages: {
+                fetch: async () => {
+                    fetches++;
+                    return new Collection(
+                        Array.from({ length: 100 }, (_, i) => [
+                            String(i),
+                            {
+                                id: String(i),
+                                createdAt: new Date(),
+                                author: { tag: 'user' },
+                                content: 'x'.repeat(100_000),
+                                attachments: new Collection(),
+                            },
+                        ]),
+                    );
+                },
+            },
+        } as unknown as TextChannel;
+        await expect(new TicketService().generateTranscript(channel)).rejects.toThrow('8 MiB');
+        expect(fetches).toBe(1);
+    });
+});

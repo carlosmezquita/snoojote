@@ -5,13 +5,14 @@
  * the likely active responder pool when enough per-staff history exists.
  */
 
-export const WAIT_ESTIMATOR_MODEL_VERSION = 'per-staff-capacity-v1';
+export const WAIT_ESTIMATOR_MODEL_VERSION = 'per-staff-capacity-v2';
 
 export interface TicketResponseData {
     createdAt: Date;
     firstResponseAt: Date;
     staffCapacityAtCreation?: number | null;
     openTicketsAtCreation?: number | null;
+    unansweredTicketsAtCreation?: number | null;
 }
 
 export type StaffStatus = 'online' | 'idle' | 'dnd' | 'busy' | 'offline' | 'invisible' | 'unknown';
@@ -343,16 +344,16 @@ function computeHistoricalBaselineLoad(tickets: TicketResponseData[]): number {
     const loads = tickets
         .map((ticket) => {
             if (
-                ticket.openTicketsAtCreation == null ||
+                ticket.unansweredTicketsAtCreation == null ||
                 ticket.staffCapacityAtCreation == null ||
-                !Number.isFinite(ticket.openTicketsAtCreation) ||
+                !Number.isFinite(ticket.unansweredTicketsAtCreation) ||
                 !Number.isFinite(ticket.staffCapacityAtCreation)
             ) {
                 return null;
             }
 
             return (
-                (Math.max(ticket.openTicketsAtCreation, 0) + 1) /
+                (Math.max(ticket.unansweredTicketsAtCreation, 0) + 1) /
                 Math.max(ticket.staffCapacityAtCreation, EPSILON)
             );
         })
