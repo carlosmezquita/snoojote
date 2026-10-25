@@ -1,9 +1,9 @@
 {
-    "name": "new_snoojote",
+    "name": "snoojote",
     "version": "1.0.0",
-    "description": "",
+    "description": "Discord community operations bot with support tickets, moderation and transactional engagement rewards",
     "main": "src/index.ts",
-    "packageManager": "bun@1.3.13",
+    "packageManager": "bun@1.4.4",
     "scripts": {
         "start": "bun src/index.ts",
         "dev": "bun --watch src/index.ts",
@@ -17,43 +17,52 @@
         "tickets:backtest-wait": "bun src/scripts/backtestWaitEstimator.ts",
         "check": "bun run typecheck && bun run lint && bun run format:check && bun run db:check && bun test",
         "deploy": "bun src/scripts/deployCommands.ts",
-        "test": "bun test"
+        "test": "bun test",
+        "audit": "bun audit --audit-level=high",
+        "bench:runtime": "bun src/scripts/benchmarkRuntime.ts"
     },
     "keywords": [],
     "author": "",
     "license": "ISC",
     "type": "module",
     "dependencies": {
-        "@langchain/core": "^1.1.45",
-        "@langchain/groq": "^1.2.0",
-        "better-sqlite3": "^12.9.0",
+        "@langchain/core": "^1.3.0",
+        "@langchain/groq": "^1.3.1",
+        "better-sqlite3": "^12.11.1",
         "canvas": "^3.2.3",
         "chalk": "^4.1.2",
-        "discord.js": "^14.26.4",
+        "discord.js": "^14.27.0",
         "dotenv": "^16.6.1",
-        "drizzle-orm": "^0.45.2",
+        "drizzle-orm": "^0.45.4",
         "glob": "^13.0.6",
         "node-cron": "^3.0.3",
         "winston": "^3.19.0",
-        "zod": "^4.4.3"
+        "zod": "^4.6.7"
     },
     "devDependencies": {
         "@eslint/js": "^10.0.1",
-        "@types/bun": "^1.3.13",
-        "@types/node": "^22.10.1",
+        "@types/bun": "1.4.4",
+        "@types/node": "^22.20.5",
         "@types/node-cron": "^3.0.11",
-        "@types/ws": "^8.5.13",
-        "drizzle-kit": "^0.31.7",
-        "eslint": "^10.3.0",
+        "@types/ws": "^8.18.2",
+        "drizzle-kit": "^0.31.11",
+        "eslint": "^10.13.0",
         "eslint-config-prettier": "^10.1.8",
-        "globals": "^17.6.0",
-        "prettier": "^3.8.3",
-        "typescript": "^5.7.2",
-        "typescript-eslint": "^8.59.3"
+        "globals": "^17.13.0",
+        "prettier": "^3.9.10",
+        "typescript": "^5.9.3",
+        "typescript-eslint": "^8.72.0"
     },
     "trustedDependencies": [
         "better-sqlite3",
         "canvas",
         "esbuild"
-    ]
+    ],
+    "overrides": {
+        "brace-expansion": "5.0.12",
+        "esbuild": "0.28.1",
+        "undici": "6.29.1",
+        "uuid": "11.1.1",
+        "ws": "8.21.0"
+    }
 }
