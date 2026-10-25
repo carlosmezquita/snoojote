@@ -116,7 +116,7 @@ required branch check if merges should be blocked until it passes.
 It applies the real migration chain; tests never open `data/database.sqlite`. Discord calls in
 workflow tests use local fakes and require no bot token.
 
-Before deploying the correctness/recovery update, see [the migration and recovery notes](docs/correctness-recovery.md).
+For database upgrades and pending purchase/ticket recovery, see [MIGRATIONS.md](MIGRATIONS.md).
 
 Useful individual commands:
 
@@ -126,6 +126,10 @@ bun run format:check
 bun run typecheck
 bun test
 ```
+
+`bun run tickets:backtest-wait` evaluates saved forecasts issued before a ticket's first response,
+grouped by model version. It reports skipped tickets without valid forecasts and measures answered
+tickets only; historical staff presence and queue state are not inferred.
 
 ## Migrating From the Old Bot
 
