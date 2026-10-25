@@ -1,12 +1,26 @@
-import { type Message, type TextChannel, EmbedBuilder, type PartialMessage } from 'discord.js';
+import {
+    type Message,
+    type TextChannel,
+    EmbedBuilder,
+    type PartialMessage,
+    PermissionFlagsBits,
+    ChannelType,
+} from 'discord.js';
 import db from '../../../database/db.js';
 import { starboardMessages } from '../../../database/schema.js';
 import { config } from '../../../config.js';
 import { eq } from 'drizzle-orm';
 import logger from '../../../utils/logger.js';
+import { SerialQueue } from '../../../shared/services/SerialQueue.js';
+
+const updates = new SerialQueue();
 
 export class StarboardService {
     public static async handleReactionUpdate(message: Message | PartialMessage) {
+        return updates.run(message.id, () => this.update(message));
+    }
+
+    private static async update(message: Message | PartialMessage) {
         let fullMessage: Message;
         if (message.partial) {
             try {
@@ -23,7 +37,26 @@ export class StarboardService {
             fullMessage = message as Message;
         }
 
-        if (fullMessage.author.bot) return;
+        if (
+            fullMessage.author.bot ||
+            !fullMessage.guild ||
+            !('permissionsFor' in fullMessage.channel)
+        )
+            return;
+        const source = fullMessage.channel;
+        if (source.type === ChannelType.PrivateThread) return;
+        const sourceNsfw = source.isThread()
+            ? source.parent?.nsfw
+            : 'nsfw' in source && source.nsfw;
+        // An uncached parent cannot establish a thread's age restriction safely.
+        if (source.isThread() && !source.parent) return;
+        // Never copy private support/moderation messages into a public starboard.
+        if (
+            !fullMessage.channel
+                .permissionsFor(fullMessage.guild.roles.everyone)
+                ?.has(PermissionFlagsBits.ViewChannel)
+        )
+            return;
 
         const starboardChannelId = config.channels.starboard;
         // Don't track reactions in the starboard channel itself
@@ -55,7 +88,11 @@ export class StarboardService {
         const starboardChannel = fullMessage.client.channels.cache.get(
             starboardChannelId,
         ) as TextChannel;
-        if (!starboardChannel) {
+        if (
+            !starboardChannel ||
+            starboardChannel.guildId !== fullMessage.guildId ||
+            (sourceNsfw && !starboardChannel.nsfw)
+        ) {
             // Silently return if channel not configured or found, or log warning
             return;
         }
@@ -85,6 +122,8 @@ export class StarboardService {
             } else {
                 // Create new
                 const starboardMessage = await starboardChannel.send({
+                    nonce: `sb:${fullMessage.id}`,
+                    enforceNonce: true,
                     content: `${winningEmoji} **${highestCount}** <#${fullMessage.channel.id}>`,
                     embeds: [embed],
                 });
@@ -103,8 +142,14 @@ export class StarboardService {
                             existing.starboardMessageId,
                         );
                         await starboardMessage.delete();
-                    } catch (e) {
-                        // Message might already be deleted
+                    } catch (error) {
+                        if (!(
+                            error &&
+                            typeof error === 'object' &&
+                            'code' in error &&
+                            error.code === 10008
+                        ))
+                            throw error;
                     }
                 }
                 await db.delete(starboardMessages).where(eq(starboardMessages.id, existing.id));
@@ -119,7 +164,7 @@ export class StarboardService {
     ): EmbedBuilder {
         const embed = new EmbedBuilder()
             .setAuthor({ name: message.author.tag, iconURL: message.author.displayAvatarURL() })
-            .setDescription(message.content || '*Mensaje sin texto*')
+            .setDescription(message.content.slice(0, 4096) || '*Mensaje sin texto*')
             .setColor('#ffe97f')
             .addFields({ name: 'Origen', value: `[Ir al mensaje](${message.url})` })
             .setFooter({ text: message.id })

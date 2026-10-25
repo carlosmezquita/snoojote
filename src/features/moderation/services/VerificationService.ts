@@ -9,16 +9,29 @@ import {
     type TextChannel,
     type Guild,
     type Interaction,
+    type ModalSubmitInteraction,
     ModalBuilder,
     TextInputBuilder,
     TextInputStyle,
 } from 'discord.js';
 import { type DiscordBot } from '../../../core/client.js';
 import captchaService from './CaptchaService.js';
-import verificationState from './VerificationStateService.js';
+import verificationState, { type VerificationStateService } from './VerificationStateService.js';
+import { type VerificationState } from '../types/verification.js';
+import { randomUUID } from 'crypto';
 import { config } from '../../../config.js';
 
-class VerificationService {
+export class VerificationService {
+    private readonly starting = new Set<string>();
+    constructor(
+        private readonly state: VerificationStateService = verificationState,
+        private readonly captcha: Pick<
+            typeof captchaService,
+            'generateCaptchaText' | 'drawCaptchaImage'
+        > = captchaService,
+        private readonly now: () => number = Date.now,
+    ) {}
+
     private readonly SUSPECT_ROLE_ID = config.roles.suspect;
     private readonly MOD_ROLE_ID = config.roles.mod;
     private readonly VERIFIER_CATEGORY_ID = config.channels.verifierCategory;
@@ -33,6 +46,9 @@ class VerificationService {
      */
     async handleMemberJoin(member: GuildMember, client: DiscordBot, accountAgeMs: number) {
         const guild = member.guild;
+        const sessionKey = `${guild.id}:${member.id}`;
+        if (this.state.has(member.id, guild.id) || this.starting.has(sessionKey)) return;
+        this.starting.add(sessionKey);
 
         try {
             await member.roles.add(this.SUSPECT_ROLE_ID);
@@ -51,19 +67,28 @@ class VerificationService {
             const channel = await this.createVerificationChannel(guild, member, client);
             if (!channel) return;
 
-            const payload = await this.generateChallengePayload(member.id, this.MAX_ATTEMPTS);
-            const msg = await channel.send(payload);
-
-            const state = {
+            const state: VerificationState = {
+                guildId: guild.id,
+                challengeId: '',
+                answer: '',
+                expiresAt: this.now() + this.KICK_TIMEOUT_MS,
+                processing: false,
                 attempts: 0,
                 channelId: channel.id,
-                mainMsgId: msg.id,
+                mainMsgId: '',
                 warningMsgId: null as string | null,
                 timeouts: [] as NodeJS.Timeout[],
             };
 
+            const payload = await this.generateChallengePayload(
+                member.id,
+                this.MAX_ATTEMPTS,
+                state,
+            );
+            const msg = await channel.send(payload);
+            state.mainMsgId = msg.id;
             this.setupTimers(state, member, channel, client);
-            verificationState.set(member.id, state);
+            this.state.set(member.id, state);
         } catch (error) {
             client.logger.error('Failed to start verification trap flow', {
                 userId: member.id,
@@ -72,6 +97,9 @@ class VerificationService {
                 accountAgeDays: Number((accountAgeMs / (1000 * 60 * 60 * 24)).toFixed(1)),
                 error,
             });
+            throw error;
+        } finally {
+            this.starting.delete(sessionKey);
         }
     }
 
@@ -81,94 +109,89 @@ class VerificationService {
     async handleInteraction(interaction: Interaction, client: DiscordBot) {
         if (
             !interaction.inGuild() ||
+            !interaction.guild ||
             !interaction.channel ||
             !('name' in interaction.channel) ||
             !interaction.channel.name.startsWith('verify-')
         )
             return;
 
+        if (!interaction.isButton() && !interaction.isModalSubmit()) return;
+        if (
+            !interaction.customId.startsWith('verify_btn_') &&
+            !interaction.customId.startsWith('verify_modal_')
+        )
+            return;
         const userId = interaction.user.id;
-        const userState = verificationState.get(userId);
-
-        if (!userState) {
-            client.logger.warn('Verification interaction received without active session', {
-                userId,
-                channelId: interaction.channelId,
-                customId: 'customId' in interaction ? interaction.customId : undefined,
+        const userState = this.state.get(userId, interaction.guildId!);
+        const expectedId = `${interaction.isButton() ? 'verify_btn_' : 'verify_modal_'}${userState?.challengeId}`;
+        if (
+            !userState ||
+            userState.channelId !== interaction.channelId ||
+            userState.expiresAt <= this.now() ||
+            userState.processing ||
+            !userState.challengeId ||
+            interaction.customId !== expectedId
+        ) {
+            await interaction.reply({
+                content: 'La verificación ha caducado o no corresponde a esta sesión.',
+                ephemeral: true,
             });
-            if (interaction.isRepliable()) {
-                await interaction.reply({
-                    content: '⚠️ Error de sesión. Por favor reingresa.',
-                    ephemeral: true,
-                });
-            }
-            if (interaction.channelId) {
-                this.scheduleVerificationChannelDelete(
-                    interaction.channelId,
-                    client,
-                    'stale verification session',
-                    10_000,
-                    interaction.channel,
-                );
-            }
             return;
         }
-
-        if (interaction.isButton() && interaction.customId.startsWith('verify_btn_')) {
-            await this.handleVerifyButton(interaction);
-        } else if (
-            interaction.isModalSubmit() &&
-            interaction.customId.startsWith('verify_modal_')
-        ) {
-            await this.handleCaptchaSubmit(interaction, userState, userId, client);
+        if (interaction.isButton()) {
+            const modal = new ModalBuilder()
+                .setCustomId(`verify_modal_${userState.challengeId}`)
+                .setTitle('Seguridad / Security');
+            const input = new TextInputBuilder()
+                .setCustomId('captcha_input')
+                .setLabel('Código / Code')
+                .setStyle(TextInputStyle.Short)
+                .setRequired(true)
+                .setMaxLength(6);
+            modal.addComponents(new ActionRowBuilder<TextInputBuilder>().addComponents(input));
+            await interaction.showModal(modal);
+            return;
         }
-    }
-
-    private async handleVerifyButton(interaction: any) {
-        const correctAnswer = interaction.customId.split('_')[2];
-        const modal = new ModalBuilder()
-            .setCustomId(`verify_modal_${correctAnswer}`)
-            .setTitle('Seguridad / Security');
-
-        const input = new TextInputBuilder()
-            .setCustomId('captcha_input')
-            .setLabel('Código / Code')
-            .setStyle(TextInputStyle.Short)
-            .setRequired(true)
-            .setMaxLength(6);
-
-        modal.addComponents(new ActionRowBuilder<TextInputBuilder>().addComponents(input));
-        await interaction.showModal(modal);
-    }
-
-    private async handleCaptchaSubmit(
-        interaction: any,
-        userState: any,
-        userId: string,
-        client: DiscordBot,
-    ) {
-        const correctAnswer = interaction.customId.split('_')[2];
-        const userAnswer = interaction.fields.getTextInputValue('captcha_input');
-
-        if (userAnswer.toUpperCase() === correctAnswer.toUpperCase()) {
-            await this.handleSuccess(interaction, userState, userId, client);
+        if (!interaction.isModalSubmit()) return;
+        const answer = interaction.fields.getTextInputValue('captcha_input');
+        if (answer.toUpperCase() === userState.answer.toUpperCase()) {
+            userState.processing = true;
+            await this.handleSuccess(
+                interaction as ModalSubmitInteraction<'cached'>,
+                userState,
+                userId,
+                client,
+            );
         } else {
-            await this.handleFailure(interaction, userState, userId, client);
+            userState.challengeId = ''; // Consume before awaiting; stale modals cannot spend attempts.
+            await this.handleFailure(
+                interaction as ModalSubmitInteraction<'cached'>,
+                userState,
+                userId,
+                client,
+            );
         }
     }
 
     private async handleSuccess(
-        interaction: any,
-        userState: any,
+        interaction: ModalSubmitInteraction<'cached'>,
+        userState: VerificationState,
         userId: string,
         client: DiscordBot,
     ) {
+        let verified = false;
         try {
-            if (interaction.member && 'roles' in interaction.member) {
+            await interaction.deferReply({ ephemeral: true });
+            if (interaction.member && !Array.isArray(interaction.member.roles)) {
                 await interaction.member.roles.remove(this.SUSPECT_ROLE_ID);
+            } else {
+                throw new Error('Verification member is unavailable');
             }
+            verified = true;
+            userState.answer = '';
 
-            await interaction.reply({ content: '✅ **Verificado / Verified.**', ephemeral: true });
+            await interaction.editReply({ content: '✅ **Verificado / Verified.**' });
             await this.sendLog(
                 interaction.guild,
                 `🟢 **Verificación Exitosa:** <@${userId}>`,
@@ -183,7 +206,18 @@ class VerificationService {
                 channelId: interaction.channelId,
                 error: err,
             });
-            if (interaction.isRepliable() && !interaction.replied && !interaction.deferred) {
+            if (interaction.deferred) {
+                await interaction
+                    .editReply({
+                        content: 'Error de permisos. Inténtalo de nuevo o contacta con el equipo.',
+                    })
+                    .catch((error: unknown) => {
+                        client.logger.warn('Failed to edit verification error response', {
+                            userId,
+                            error,
+                        });
+                    });
+            } else if (interaction.isRepliable() && !interaction.replied) {
                 await interaction
                     .reply({ content: 'Error de permisos.', ephemeral: true })
                     .catch((replyError: unknown) => {
@@ -196,22 +230,27 @@ class VerificationService {
                     });
             }
         } finally {
-            this.cleanupVerificationSession(
-                userId,
-                client,
-                'verification success',
-                3000,
-                interaction.channel,
-            );
+            if (verified)
+                this.cleanupVerificationSession(
+                    userId,
+                    interaction.guildId,
+                    client,
+                    'verification success',
+                    3000,
+                    interaction.channel as TextChannel,
+                );
+            else userState.processing = false;
         }
     }
 
     private async handleFailure(
-        interaction: any,
-        userState: any,
+        interaction: ModalSubmitInteraction<'cached'>,
+        userState: VerificationState,
         userId: string,
         client: DiscordBot,
     ) {
+        // Acknowledge before logging, rendering a CAPTCHA, or making moderation requests.
+        await interaction.deferUpdate();
         userState.attempts++;
         const attemptsLeft = this.MAX_ATTEMPTS - userState.attempts;
         client.logger.info('Verification challenge failed', {
@@ -237,7 +276,10 @@ class VerificationService {
                     `🚫 **Expulsado (Intentos):** <@${userId}> falló 3 veces.`,
                     client,
                 );
-                await interaction.reply({ content: '❌ **Expulsado / Kicked**', ephemeral: true });
+                await interaction.followUp({
+                    content: '❌ **Expulsado / Kicked**',
+                    ephemeral: true,
+                });
             } catch (e) {
                 client.logger.error('Verification max-attempt cleanup failed', {
                     userId,
@@ -245,9 +287,9 @@ class VerificationService {
                     channelId: interaction.channelId,
                     error: e,
                 });
-                if (interaction.isRepliable() && !interaction.replied && !interaction.deferred) {
+                if (interaction.isRepliable()) {
                     await interaction
-                        .reply({
+                        .followUp({
                             content: 'No pude expulsar al usuario. Revisa permisos.',
                             ephemeral: true,
                         })
@@ -263,23 +305,24 @@ class VerificationService {
             } finally {
                 this.cleanupVerificationSession(
                     userId,
+                    interaction.guildId,
                     client,
                     'verification failed max attempts',
                     3000,
-                    interaction.channel,
+                    interaction.channel as TextChannel,
                 );
             }
         } else {
             // Retry logic
-            await interaction.deferUpdate();
             try {
                 if (interaction.channel && interaction.channel.isTextBased()) {
                     const mainMsg = await interaction.channel.messages.fetch(userState.mainMsgId);
                     const newPayload = await this.generateChallengePayload(
                         interaction.user.id,
                         attemptsLeft,
+                        userState,
                     );
-                    await mainMsg.edit(newPayload as any);
+                    await mainMsg.edit(newPayload);
                     await interaction.followUp({
                         content: `❌ **Incorrecto / Incorrect.**`,
                         ephemeral: true,
@@ -298,11 +341,12 @@ class VerificationService {
                     const newPayload = await this.generateChallengePayload(
                         interaction.user.id,
                         attemptsLeft,
+                        userState,
                     );
                     try {
-                        const newMsg = await interaction.channel.send(newPayload as any);
+                        const newMsg = await interaction.channel.send(newPayload);
                         userState.mainMsgId = newMsg.id;
-                        verificationState.set(userId, userState);
+                        this.state.set(userId, userState);
                     } catch (sendError) {
                         client.logger.error('Failed to send replacement verification challenge', {
                             userId,
@@ -352,7 +396,12 @@ class VerificationService {
         });
     }
 
-    private setupTimers(state: any, member: GuildMember, channel: TextChannel, client: DiscordBot) {
+    private setupTimers(
+        state: VerificationState,
+        member: GuildMember,
+        channel: TextChannel,
+        client: DiscordBot,
+    ) {
         const scheduleWarning = (ms: number, text: string) => {
             const tid = setTimeout(async () => {
                 try {
@@ -444,6 +493,7 @@ class VerificationService {
             } finally {
                 this.cleanupVerificationSession(
                     member.id,
+                    member.guild.id,
                     client,
                     'verification timeout',
                     0,
@@ -492,14 +542,20 @@ class VerificationService {
         }
     }
 
-    public async generateChallengePayload(memberId: string, attemptsLeft: number) {
-        const captchaText = captchaService.generateCaptchaText();
-        const imageBuffer = await captchaService.drawCaptchaImage(captchaText);
+    public async generateChallengePayload(
+        memberId: string,
+        attemptsLeft: number,
+        state: VerificationState,
+    ) {
+        const captchaText = this.captcha.generateCaptchaText();
+        state.challengeId = randomUUID();
+        state.answer = captchaText;
+        const imageBuffer = await this.captcha.drawCaptchaImage(captchaText);
         const attachment = new AttachmentBuilder(imageBuffer, { name: 'challenge.png' });
 
         const row = new ActionRowBuilder<ButtonBuilder>().addComponents(
             new ButtonBuilder()
-                .setCustomId(`verify_btn_${captchaText}`)
+                .setCustomId(`verify_btn_${state.challengeId}`)
                 .setLabel('Verificar / Verify')
                 .setStyle(ButtonStyle.Success)
                 .setEmoji('🔒'),
@@ -551,18 +607,19 @@ class VerificationService {
 
     private cleanupVerificationSession(
         userId: string,
+        guildId: string,
         client: DiscordBot,
         reason: string,
         delayMs: number,
-        channel?: any,
+        channel?: TextChannel,
     ) {
-        const state = verificationState.get(userId);
+        const state = this.state.get(userId, guildId);
         const channelId = state?.channelId ?? channel?.id;
 
         if (state) {
             state.timeouts.forEach((t: NodeJS.Timeout) => clearTimeout(t));
         }
-        verificationState.delete(userId);
+        this.state.delete(userId, guildId);
 
         if (channelId) {
             this.scheduleVerificationChannelDelete(channelId, client, reason, delayMs, channel);
@@ -574,16 +631,17 @@ class VerificationService {
         client: DiscordBot,
         reason: string,
         delayMs: number,
-        channel?: any,
+        channel?: TextChannel,
     ) {
         const deleteChannel = async () => {
             await this.deleteVerificationChannel(channelId, client, reason, channel);
         };
 
         if (delayMs > 0) {
-            setTimeout(() => {
+            const timer = setTimeout(() => {
                 void deleteChannel();
             }, delayMs);
+            timer.unref();
             return;
         }
 
@@ -594,7 +652,7 @@ class VerificationService {
         channelId: string,
         client: DiscordBot,
         reason: string,
-        channel?: any,
+        channel?: TextChannel,
     ) {
         try {
             const target =
@@ -616,7 +674,7 @@ class VerificationService {
                 return;
             }
 
-            if (typeof target.delete !== 'function') {
+            if (!('delete' in target) || typeof target.delete !== 'function') {
                 client.logger.warn(
                     'Verification cleanup skipped because channel is not deletable',
                     {

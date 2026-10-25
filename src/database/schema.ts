@@ -1,4 +1,12 @@
-import { sqliteTable, integer, text, index, uniqueIndex, real } from 'drizzle-orm/sqlite-core';
+import {
+    sqliteTable,
+    integer,
+    text,
+    index,
+    uniqueIndex,
+    real,
+    check,
+} from 'drizzle-orm/sqlite-core';
 import { sql } from 'drizzle-orm';
 
 export const tickets = sqliteTable(
@@ -6,6 +14,7 @@ export const tickets = sqliteTable(
     {
         id: integer('id').primaryKey({ autoIncrement: true }),
         channelId: text('channel_id').notNull(),
+        guildId: text('guild_id'),
         userId: text('user_id').notNull(),
         optionId: text('option_id'),
         status: text('status').default('open').notNull(),
@@ -22,12 +31,17 @@ export const tickets = sqliteTable(
         staffOnlineAtCreation: integer('staff_online_at_creation'),
         staffCapacityAtCreation: real('staff_capacity_at_creation'),
         openTicketsAtCreation: integer('open_tickets_at_creation'),
+        unansweredTicketsAtCreation: integer('unanswered_tickets_at_creation'),
     },
     (table) => ({
         // Optimizes ticket closure and lookup by channel
         channelIdIdx: index('tickets_channel_id_idx').on(table.channelId),
         // Optimizes finding open tickets for a user
         userStatusIdx: index('tickets_user_status_idx').on(table.userId, table.status),
+        answeredCreatedIdx: index('tickets_answered_created_idx')
+            .on(table.createdAt)
+            .where(sql`${table.firstResponseAt} IS NOT NULL`),
+        firstResponseIdx: index('tickets_first_response_idx').on(table.firstResponseAt),
     }),
 );
 
@@ -89,14 +103,23 @@ export const streaks = sqliteTable('streaks', {
     claimedMilestones: text('claimed_milestones', { mode: 'json' }).default(sql`'[]'`),
 });
 
-export const users = sqliteTable('users', {
-    userId: text('user_id').primaryKey(),
-    points: integer('points').default(0).notNull(),
-    level: integer('level').default(1).notNull(),
-    dailyQuest: text('daily_quest', { mode: 'json' }), // Stores QuestData
-    lastDaily: integer('last_daily', { mode: 'timestamp' }),
-    lastActivityDate: integer('last_activity_date', { mode: 'timestamp' }),
-});
+export const users = sqliteTable(
+    'users',
+    {
+        userId: text('user_id').primaryKey(),
+        points: integer('points').default(0).notNull(),
+        level: integer('level').default(1).notNull(),
+        dailyQuest: text('daily_quest', { mode: 'json' }), // Stores QuestData
+        lastDaily: integer('last_daily', { mode: 'timestamp' }),
+        lastActivityDate: integer('last_activity_date', { mode: 'timestamp' }),
+    },
+    (table) => [
+        check(
+            'users_points_safe_integer',
+            sql`typeof(${table.points}) = 'integer' AND ${table.points} BETWEEN 0 AND 9007199254740991`,
+        ),
+    ],
+);
 
 export const economyDailyEarnings = sqliteTable(
     'economy_daily_earnings',
@@ -165,7 +188,7 @@ export const userInventory = sqliteTable(
             .references(() => shopItems.id, { onDelete: 'cascade' })
             .notNull(),
         acquiredAt: integer('acquired_at', { mode: 'timestamp' })
-            .default(sql`(CURRENT_TIMESTAMP)`)
+            .default(sql`(unixepoch())`)
             .notNull(),
     },
     (table) => ({
@@ -174,18 +197,29 @@ export const userInventory = sqliteTable(
     }),
 );
 
-export const shopPurchaseLocks = sqliteTable('shop_purchase_locks', {
-    lockKey: text('lock_key').primaryKey(),
-    userId: text('user_id').notNull(),
-    itemId: integer('item_id').notNull(),
-    createdAt: integer('created_at', { mode: 'timestamp' })
-        .default(sql`(unixepoch())`)
-        .notNull(),
-});
-
-export const economyTransactionLocks = sqliteTable('economy_transaction_locks', {
-    lockKey: text('lock_key').primaryKey(),
-    createdAt: integer('created_at', { mode: 'timestamp' })
-        .default(sql`(unixepoch())`)
-        .notNull(),
-});
+// A pending purchase blocks another debit until it is completed or refunded.
+// No FK to the catalog: recovery must survive an item being removed from config.
+export const shopPurchases = sqliteTable(
+    'shop_purchases',
+    {
+        id: text('id').primaryKey(),
+        userId: text('user_id').notNull(),
+        guildId: text('guild_id').notNull(),
+        itemId: integer('item_id').notNull(),
+        price: integer('price').notNull(),
+        roleId: text('role_id'),
+        roleWasOwned: integer('role_was_owned', { mode: 'boolean' }).default(false).notNull(),
+        status: text('status', { enum: ['pending', 'completed', 'refunded'] })
+            .default('pending')
+            .notNull(),
+        lastError: text('last_error'),
+        createdAt: integer('created_at', { mode: 'timestamp' })
+            .default(sql`(unixepoch())`)
+            .notNull(),
+    },
+    (table) => ({
+        pendingUserIdx: uniqueIndex('shop_purchase_pending_user_idx')
+            .on(table.userId)
+            .where(sql`${table.status} = 'pending'`),
+    }),
+);

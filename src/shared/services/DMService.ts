@@ -34,6 +34,7 @@ export interface DMOptions {
 export interface DMWithFallbackOptions extends DMOptions {
     fallbackChannelId?: string;
     fallbackContent?: string;
+    publicDetails?: boolean;
 }
 
 export interface DMDeliveryResult {
@@ -146,9 +147,10 @@ export class DMService {
             await fallbackChannel.send({
                 content:
                     options.fallbackContent ||
-                    `${user.toString()} no he podido enviarte esta notificación por MD, así que la publico aquí.`,
-                embeds: [embed],
-                files: options.files,
+                    `${user.toString()} no he podido enviarte una notificación por MD. Contacta con el equipo si necesitas ayuda.`,
+                allowedMentions: { parse: [], users: [user.id] },
+                embeds: options.publicDetails ? [embed] : [],
+                files: options.publicDetails ? options.files : [],
             });
             return true;
         } catch (error) {

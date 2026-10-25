@@ -1,33 +1,33 @@
 import { ChatGroq } from '@langchain/groq';
-import { ChatPromptTemplate, MessagesPlaceholder } from '@langchain/core/prompts';
-import { SystemMessage, type BaseMessage } from '@langchain/core/messages';
+import { SystemMessage, HumanMessage, type BaseMessage } from '@langchain/core/messages';
 import { config } from '../../../config.js';
+import {
+    resolveGroqMaxTokens,
+    resolveGroqModel,
+    resolveGroqReasoningOptions,
+} from './groqModel.js';
 
+/** A bounded chat integration; it has no autonomous tool execution. */
 export class Agent {
-    private chatGroq: ChatGroq;
-    private chain: any;
-
+    private readonly model: ChatGroq;
     constructor() {
-        this.chatGroq = new ChatGroq({
-            maxTokens: config.ai.maxTokens,
+        if (!process.env.GROQ_API_KEY)
+            throw new Error('AI is unavailable: GROQ_API_KEY is missing');
+        const model = resolveGroqModel(config.ai.model);
+        this.model = new ChatGroq({
+            model,
+            maxTokens: resolveGroqMaxTokens(model, config.ai.maxTokens),
             temperature: config.ai.temperature,
-            model: config.ai.model,
             apiKey: process.env.GROQ_API_KEY,
+            timeout: config.ai.timeoutMs,
+            maxRetries: 0,
+            ...resolveGroqReasoningOptions(model),
         });
-
-        const prompt = ChatPromptTemplate.fromMessages([
-            new SystemMessage(config.ai.systemPrompt),
-            new MessagesPlaceholder('history'),
-            ['human', '{input}'],
-        ]);
-
-        this.chain = prompt.pipe(this.chatGroq);
     }
-
     async getResponse(input: string, history: BaseMessage[] = []) {
-        return await this.chain.invoke({
-            input,
-            history,
-        });
+        return this.model.invoke(
+            [new SystemMessage(config.ai.systemPrompt), ...history, new HumanMessage(input)],
+            { signal: AbortSignal.timeout(config.ai.timeoutMs) },
+        );
     }
 }

@@ -46,31 +46,28 @@ function shouldIgnoreMessage(message: Message): boolean {
 }
 
 async function handleSpam(message: Message, client: DiscordBot) {
-    const currentCount = rateLimiter.check(message.author.id);
+    const currentCount = rateLimiter.check(`${message.guildId}:${message.author.id}`);
     const decision = getLinkRateLimitDecision(currentCount);
     if (!decision.shouldDelete) return;
 
     const alertsChannel = client.channels.cache.get(config.channels.alerts) as TextChannel;
 
-    if (decision.violationCount < WARNS_LIMIT) {
-        await sendWarning(message, decision.violationCount);
-    }
-
-    if (SEND_ALERT && alertsChannel) {
-        await sendAlertLog(message, alertsChannel, decision.violationCount);
-    }
-
+    // Enforce first. Notification failures must never prevent deletion or a sanction.
     await message.delete().catch((error) => {
-        client.logger.warn('Failed to delete link spam message', {
-            messageId: message.id,
-            channelId: message.channelId,
-            userId: message.author.id,
-            error,
-        });
+        client.logger.warn('Failed to delete link spam message', { messageId: message.id, error });
     });
-
-    if (decision.shouldBan) {
-        await banUser(message, alertsChannel);
+    if (decision.shouldBan)
+        await banUser(message, alertsChannel).catch((error) => {
+            client.logger.error('Failed to ban link spam member', {
+                userId: message.author.id,
+                error,
+            });
+        });
+    else await sendWarning(message, decision.violationCount);
+    if (SEND_ALERT && alertsChannel?.isTextBased()) {
+        await sendAlertLog(message, alertsChannel, decision.violationCount).catch((error) => {
+            client.logger.warn('Failed to log link spam', { messageId: message.id, error });
+        });
     }
 }
 
@@ -117,7 +114,11 @@ async function sendAlertLog(message: Message, channel: TextChannel, violationCou
                 { name: 'Autor', value: message.author.toString(), inline: true },
                 { name: `Avisos`, value: `${violationCount}/${WARNS_LIMIT}`, inline: true },
                 { name: 'Canal', value: message.channel.toString(), inline: true },
-                { name: 'Mensaje', value: message.content, inline: false },
+                {
+                    name: 'Mensaje',
+                    value: message.content.slice(0, 1024) || '[sin texto]',
+                    inline: false,
+                },
             ),
         ],
     });

@@ -1,14 +1,14 @@
 import cron from 'node-cron';
-import { type TextChannel } from 'discord.js';
+import { type TextChannel, Events } from 'discord.js';
 import { type DiscordBot } from '../../../core/client.js';
 import raeService from '../services/raeService.js';
 import { config } from '../../../config.js';
 import { createRaeEmbed } from '../utils/embedHelper.js';
-import { DailyWordService, getSpainHour } from '../services/dailyWordService.js';
+import { DailyWordService, getSpainHour, getSpainDateKey } from '../services/dailyWordService.js';
 import { DrizzleDailyWordStore } from '../services/dailyWordStore.js';
 
-export const name = 'ready';
-export const once = false;
+export const name = Events.ClientReady;
+export const once = true;
 
 const dailyWordService = new DailyWordService({
     store: new DrizzleDailyWordStore(),
@@ -22,6 +22,7 @@ const dailyWordService = new DailyWordService({
 
 let clientLogger: DiscordBot['logger'] | null = null;
 let isScheduled = false;
+let posting = false;
 
 export const execute = (client: DiscordBot) => {
     clientLogger = client.logger;
@@ -86,6 +87,8 @@ export const postPreparedDailyWord = async (
     client: DiscordBot,
     mode: 'scheduled-post' | 'startup-catch-up',
 ) => {
+    if (posting) return null;
+    posting = true;
     try {
         const now = new Date();
         const prepared = await dailyWordService.getPreparedDailyWord(now);
@@ -106,13 +109,19 @@ export const postPreparedDailyWord = async (
             isDailyWord: true,
         });
 
-        await channel.send({ embeds: [embed] });
+        await channel.send({
+            embeds: [embed],
+            nonce: `word:${getSpainDateKey(now)}`,
+            enforceNonce: true,
+        });
         await dailyWordService.markDailyWordPosted(now);
         client.logger.info(`Posted prepared Word of the Day: ${prepared.word}`);
         return prepared.word;
     } catch (error) {
         client.logger.error(`Daily Word ${mode} Error: ${error}`);
         return null;
+    } finally {
+        posting = false;
     }
 };
 

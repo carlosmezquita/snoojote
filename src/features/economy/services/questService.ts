@@ -1,4 +1,4 @@
-import { ChannelType, type TextChannel } from 'discord.js';
+import { ChannelType, PermissionFlagsBits, type TextChannel } from 'discord.js';
 import { type DiscordBot } from '../../../core/client.js';
 import { config } from '../../../config.js';
 
@@ -34,18 +34,18 @@ export class QuestService {
     }
 
     // Generate a new random quest
-    async generateQuest(client: DiscordBot): Promise<QuestData> {
+    generateQuest(client: DiscordBot, userId?: string): QuestData {
         const types = [QuestType.MESSAGE_COUNT, QuestType.VOICE_TIME];
         const selectedType = types[Math.floor(Math.random() * types.length)];
 
         if (selectedType === QuestType.MESSAGE_COUNT) {
-            return this.generateMessageQuest(client);
+            return this.generateMessageQuest(client, userId);
         } else {
             return this.generateVoiceQuest();
         }
     }
 
-    private async generateMessageQuest(client: DiscordBot): Promise<QuestData> {
+    private generateMessageQuest(client: DiscordBot, userId?: string): QuestData {
         // Find a suitable text channel (not rules, not announcements, etc if possible)
         // For simplicity, we can fetch cached channels or just pick a random text channel the bot can see.
         // In a real app, you might want to filter by specific categories.
@@ -53,6 +53,18 @@ export class QuestService {
         const channels = client.channels.cache.filter(
             (c) =>
                 c.type === ChannelType.GuildText &&
+                (!config.guildId || c.guild.id === config.guildId) &&
+                c
+                    .permissionsFor(c.guild.roles.everyone)
+                    ?.has([PermissionFlagsBits.ViewChannel, PermissionFlagsBits.SendMessages]) ===
+                    true &&
+                (!userId ||
+                    c
+                        .permissionsFor(userId)
+                        ?.has([
+                            PermissionFlagsBits.ViewChannel,
+                            PermissionFlagsBits.SendMessages,
+                        ]) === true) &&
                 !this.isExcludedQuestChannel(c.id) &&
                 !c.name.includes('log') &&
                 !c.name.includes('verify') &&

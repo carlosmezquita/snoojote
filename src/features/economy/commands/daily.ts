@@ -5,30 +5,18 @@ import { createEmbed, Colors } from '../../../shared/utils/embeds.js';
 import questService, { QuestType } from '../services/questService.js';
 import voiceSessionService from '../services/voiceSessionService.js';
 import { applyVoiceMinutes } from '../events/voiceStateUpdate.js';
-import { config } from '../../../config.js';
 
 export const data = new SlashCommandBuilder()
     .setName('daily')
     .setDescription('Consulta tu tarea diaria o reclama tu recompensa.');
 
 export const execute = async (interaction: ChatInputCommandInteraction, client: DiscordBot) => {
+    await interaction.deferReply({ ephemeral: true });
     // 1. Get current quest (this also ensures one exists for the day)
     let quest = await economyService.getDailyQuest(interaction.user.id, client);
     await syncActiveVoiceQuestProgress(interaction, quest.type);
     quest = await economyService.getDailyQuest(interaction.user.id, client);
     const currentReward = await economyService.getCurrentDailyReward(interaction.user.id);
-
-    // 2. Try to claim (checks 24h cooldown AND completion)
-    // We do a check first to see if we SHOULD claim or just show status
-
-    // If completed and not claimed recently (we rely on claimDaily to check lastDaily)
-    // Actually, claimDaily checks if quest is completed.
-
-    // Let's try to claim if it looks completed. If not, claimDaily will fail with message.
-    // However, if we just want to VIEW status, maybe we shouldn't auto-claim?
-    // User requested "/daily" to claim reward AND/OR see quest.
-    // Let's try to claim. If it fails because "not completed", show progress.
-    // If it fails because "already claimed", show cooldown.
 
     const claimResult = await economyService.claimDaily(interaction.user.id);
 
@@ -38,7 +26,7 @@ export const execute = async (interaction: ChatInputCommandInteraction, client: 
             `🎉 Has completado tu tarea diaria:\n**${quest.description}**\n\nRecompensa: **${claimResult.reward}** ₧`,
             Colors.Success,
         );
-        await interaction.reply({ embeds: [embed], ephemeral: true });
+        await interaction.editReply({ embeds: [embed] });
         return;
     }
 
@@ -51,7 +39,7 @@ export const execute = async (interaction: ChatInputCommandInteraction, client: 
             `Ya has reclamado tu recompensa de hoy.\n${claimResult.message}`,
             Colors.Warning,
         );
-        await interaction.reply({ embeds: [embed], ephemeral: true });
+        await interaction.editReply({ embeds: [embed] });
         return;
     }
 
@@ -66,7 +54,7 @@ export const execute = async (interaction: ChatInputCommandInteraction, client: 
         Colors.Info,
     );
 
-    await interaction.reply({ embeds: [embed], ephemeral: true });
+    await interaction.editReply({ embeds: [embed] });
 };
 
 async function syncActiveVoiceQuestProgress(
@@ -89,13 +77,13 @@ async function syncActiveVoiceQuestProgress(
         return;
     }
 
-    const elapsed = voiceSessionService.collectElapsed(interaction.user.id);
-    if (elapsed?.minutes) {
+    for (const elapsed of voiceSessionService.collectDated(interaction.user.id)) {
         await applyVoiceMinutes(
             interaction.user.id,
             elapsed.channelId,
             elapsed.minutes,
             member.voice,
+            elapsed.earnedAt,
         );
     }
 }

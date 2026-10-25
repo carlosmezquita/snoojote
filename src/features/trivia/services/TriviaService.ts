@@ -3,6 +3,7 @@ import path from 'path';
 import { type TextChannel, EmbedBuilder } from 'discord.js';
 import { type DiscordBot } from '../../../core/client.js';
 import { config } from '../../../config.js';
+import { randomUUID } from 'crypto';
 
 const fileName = path.join(process.cwd(), 'data', 'questions-dataset.json');
 const dailyPingID = config.roles.dailyPing;
@@ -21,6 +22,23 @@ interface QuestionsData {
 }
 
 export class TriviaService {
+    private running = false;
+    constructor(
+        private readonly dataFile = fileName,
+        private readonly retryDelay = RETRY_DELAY_MS,
+    ) {}
+    private write(questions: QuestionsData) {
+        const temporary = `${this.dataFile}.${randomUUID()}.tmp`;
+        try {
+            fs.writeFileSync(temporary, JSON.stringify(questions, null, 2), {
+                encoding: 'utf8',
+                mode: 0o600,
+            });
+            fs.renameSync(temporary, this.dataFile);
+        } finally {
+            if (fs.existsSync(temporary)) fs.unlinkSync(temporary);
+        }
+    }
     async processDailyQuestionIfDue(channel: TextChannel, client: DiscordBot, now = new Date()) {
         if (!this.isDailyQuestionTimeReached(now)) {
             client.logger.info(
@@ -37,13 +55,15 @@ export class TriviaService {
         client: DiscordBot,
         options: { force?: boolean; now?: Date } = {},
     ) {
+        if (this.running) return false;
+        this.running = true;
         try {
-            if (!fs.existsSync(fileName)) {
+            if (!fs.existsSync(this.dataFile)) {
                 client.logger.error(`Daily Question Error: File not found at ${fileName}`);
                 return false;
             }
 
-            const fileContent = fs.readFileSync(fileName, 'utf8');
+            const fileContent = fs.readFileSync(this.dataFile, 'utf8');
             const questions = JSON.parse(fileContent) as QuestionsData;
             const todayKey = this.getMadridDateKey(options.now ?? new Date());
 
@@ -79,7 +99,8 @@ export class TriviaService {
                     iconURL: 'https://cdn-icons-png.flaticon.com/512/5893/5893002.png',
                 })
                 .setFooter({ text: 'Preguntas de la Comunidad' })
-                .setTitle(questionText);
+                .setTitle(questionText.length > 256 ? 'Pregunta Diaria' : questionText)
+                .setDescription(questionText.length > 256 ? questionText.slice(0, 4000) : null);
 
             const content = `<@&${dailyPingID}>`;
 
@@ -87,14 +108,20 @@ export class TriviaService {
             let sentMessage = null;
             for (let attempt = 1; attempt <= MAX_RETRIES; attempt++) {
                 try {
-                    sentMessage = await channel.send({ content, embeds: [embed] });
+                    sentMessage = await channel.send({
+                        content,
+                        embeds: [embed],
+                        allowedMentions: { parse: [], roles: [dailyPingID] },
+                        nonce: `question:${todayKey}`,
+                        enforceNonce: true,
+                    });
                     client.logger.info(`Daily question sent successfully on attempt ${attempt}`);
                     break;
                 } catch (err: any) {
                     client.logger.error(
                         `Attempt ${attempt} failed to send daily question: ${err.message}`,
                     );
-                    if (attempt < MAX_RETRIES) await sleep(RETRY_DELAY_MS);
+                    if (attempt < MAX_RETRIES) await sleep(this.retryDelay);
                 }
             }
 
@@ -125,7 +152,7 @@ export class TriviaService {
                         question: questionText,
                     });
 
-                    fs.writeFileSync(fileName, JSON.stringify(questions, null, 2), 'utf8');
+                    this.write(questions);
                 }
 
                 // 5. LOW QUESTIONS ALERT
@@ -151,7 +178,7 @@ export class TriviaService {
                 }
 
                 if (isOutOfStock) {
-                    fs.writeFileSync(fileName, JSON.stringify(questions, null, 2), 'utf8');
+                    this.write(questions);
                 }
 
                 return true;
@@ -164,6 +191,8 @@ export class TriviaService {
         } catch (error) {
             client.logger.error(`Daily Question System Error: ${error}`);
             return false;
+        } finally {
+            this.running = false;
         }
     }
 

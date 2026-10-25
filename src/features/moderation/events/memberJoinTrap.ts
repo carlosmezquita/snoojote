@@ -11,17 +11,21 @@ export const once = false;
 export const execute = async (member: GuildMember, client: DiscordBot) => {
     const guild = member.guild;
 
-    const cachedInvites = inviteCache.get(guild.id);
-    const newInvites = await guild.invites.fetch();
-
-    // Find used invite
-    const usedInvite = newInvites.find((inv) => {
-        const oldUses = cachedInvites ? cachedInvites.get(inv.code) || 0 : 0;
-        return (inv.uses || 0) > oldUses;
-    });
-
-    // Update cache
-    inviteCache.set(guild.id, new Collection(newInvites.map((inv) => [inv.code, inv.uses || 0])));
+    // Invite attribution is optional; a missing ManageGuild permission must not bypass verification.
+    let usedInvite: { code: string } | undefined;
+    try {
+        const cachedInvites = inviteCache.get(guild.id);
+        const newInvites = await guild.invites.fetch();
+        usedInvite = newInvites.find(
+            (inv) => (inv.uses ?? 0) > (cachedInvites?.get(inv.code) ?? 0),
+        );
+        inviteCache.set(
+            guild.id,
+            new Collection(newInvites.map((inv) => [inv.code, inv.uses ?? 0])),
+        );
+    } catch (error) {
+        client.logger.warn('Invite attribution unavailable', { guildId: guild.id, error });
+    }
 
     client.logger.info('Guild member joined', {
         userId: member.id,

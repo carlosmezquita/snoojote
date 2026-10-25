@@ -18,7 +18,6 @@ export const minecraftTicket: TicketOptionConfig = {
     buttonStyle: ButtonStyle.Secondary,
 
     adminRoles: [config.roles.support, config.roles.mod],
-    readOnlyRoles: [],
 
     channelPrefix: 'mc-',
     categoryId: config.channels.ticketCategory,
@@ -30,7 +29,6 @@ export const minecraftTicket: TicketOptionConfig = {
     color: 'Green',
 
     enableDmOnOpen: true,
-    autoCloseHours: 48,
 
     pingHere: false,
     pingEveryone: false,

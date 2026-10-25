@@ -18,7 +18,6 @@ export const rplaceTicket: TicketOptionConfig = {
     buttonStyle: ButtonStyle.Secondary,
 
     adminRoles: [config.roles.support, config.roles.mod],
-    readOnlyRoles: [],
 
     channelPrefix: 'rplace-',
     categoryId: config.channels.ticketCategory,
@@ -30,7 +29,6 @@ export const rplaceTicket: TicketOptionConfig = {
     color: 'Grey',
 
     enableDmOnOpen: true,
-    autoCloseHours: 72,
 
     pingHere: false,
     pingEveryone: false,

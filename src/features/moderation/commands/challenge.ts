@@ -1,3 +1,4 @@
+export const permissionLevel = 'staff' as const;
 import {
     SlashCommandBuilder,
     type ChatInputCommandInteraction,
@@ -27,8 +28,9 @@ export const execute = async (interaction: ChatInputCommandInteraction, client: 
         return;
     }
 
-    const member = (interaction.member as GuildMember) || 
-        await interaction.guild!.members.fetch(interaction.user.id);
+    const member =
+        (interaction.member as GuildMember) ||
+        (await interaction.guild!.members.fetch(interaction.user.id));
 
     if (!isStaff(member)) {
         await interaction.reply({

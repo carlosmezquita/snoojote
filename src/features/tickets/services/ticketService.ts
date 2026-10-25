@@ -10,7 +10,7 @@ import {
     type User,
     OverwriteType,
 } from 'discord.js';
-import { and, count, eq } from 'drizzle-orm';
+import { and, count, eq, inArray, isNull, or } from 'drizzle-orm';
 import db from '../../../database/db.js';
 import { tickets } from '../../../database/schema.js';
 import { config } from '../../../config.js';
@@ -20,33 +20,64 @@ import { type TicketOptionConfig } from '../config/TicketConfig.js';
 import logger from '../../../utils/logger.js';
 import { formatDuration } from './waitTimeEstimator.js';
 import { getTicketStaffRoleIds } from '../utils/ticketStaff.js';
+import { randomUUID } from 'crypto';
+import responseTimeService from './responseTimeService.js';
+import { SerialQueue } from '../../../shared/services/SerialQueue.js';
+
+// Shared across service instances; lifecycle operations must not interleave Discord side effects.
+const lifecycle = new SerialQueue();
+const transcriptByteLimit = 8 * 1024 * 1024;
+const transcriptPageLimit = 100;
 
 type TicketRecord = typeof tickets.$inferSelect;
 
+type ResponseTimes = Pick<
+    typeof responseTimeService,
+    | 'getStaffCapacity'
+    | 'getOpenTicketCount'
+    | 'getUnansweredQueueLength'
+    | 'createEstimate'
+    | 'recordEstimateSnapshot'
+>;
+
 export class TicketService {
+    private readonly creating = new Set<number>();
+    constructor(private readonly responseTimes: ResponseTimes = responseTimeService) {}
+
     async createTicket(
         user: User,
         guild: Guild,
         option: TicketOptionConfig,
         modalData: { question: string; answer: string }[],
     ): Promise<TextChannel | null> {
-        const existingOpenTickets = await db
-            .select({ value: count() })
-            .from(tickets)
-            .where(and(eq(tickets.userId, user.id), eq(tickets.status, 'open')))
-            .get();
-
-        if ((existingOpenTickets?.value ?? 0) >= config.tickets.maxOpenPerUser) {
-            logger.info('Ticket creation rejected by open ticket limit', {
-                userId: user.id,
-                guildId: guild.id,
-                openTicketCount: existingOpenTickets?.value ?? 0,
-                maxOpenPerUser: config.tickets.maxOpenPerUser,
-                optionId: option.id,
-            });
-            return null;
-        }
-
+        // Reserve synchronously in SQLite before the first Discord request.
+        const reservation = db.transaction((tx) => {
+            const existing = tx
+                .select({ value: count() })
+                .from(tickets)
+                .where(
+                    and(
+                        eq(tickets.userId, user.id),
+                        inArray(tickets.status, ['open', 'creating', 'creation_failed']),
+                    ),
+                )
+                .get();
+            if ((existing?.value ?? 0) >= config.tickets.maxOpenPerUser) return null;
+            return tx
+                .insert(tickets)
+                .values({
+                    channelId: `pending:${randomUUID()}`,
+                    guildId: guild.id,
+                    userId: user.id,
+                    optionId: option.id,
+                    status: 'creating',
+                })
+                .returning()
+                .get();
+        });
+        if (!reservation) return null;
+        this.creating.add(reservation.id);
+        let channel: TextChannel | undefined;
         try {
             const channelName = `${option.channelPrefix}${user.username.substring(0, 10)}`;
 
@@ -84,14 +115,19 @@ export class TicketService {
                 });
             }
 
-            const channel = await guild.channels.create({
+            channel = await guild.channels.create({
                 name: channelName,
+                topic: `snoojote-ticket:${reservation.id}`,
                 type: ChannelType.GuildText,
                 parent: option.categoryId || config.channels.ticketCategory || undefined,
                 permissionOverwrites,
             });
 
-            const responseTimeService = (await import('./responseTimeService.js')).default;
+            db.update(tickets)
+                .set({ channelId: channel.id })
+                .where(eq(tickets.id, reservation.id))
+                .run();
+            const responseTimeService = this.responseTimes;
             const staffCapacity = await responseTimeService.getStaffCapacity(guild, {
                 forceRefresh: true,
             });
@@ -104,22 +140,16 @@ export class TicketService {
                 unansweredQueueLength,
             );
 
-            const insertedTicket = await db
-                .insert(tickets)
-                .values({
-                    channelId: channel.id,
-                    userId: user.id,
-                    optionId: option.id,
-                    status: 'open',
-                    createdAt: new Date(),
+            await db
+                .update(tickets)
+                .set({
                     staffOnlineAtCreation,
                     staffCapacityAtCreation,
                     openTicketsAtCreation,
+                    unansweredTicketsAtCreation: unansweredQueueLength,
                 })
-                .returning({ id: tickets.id })
-                .get();
-
-            await responseTimeService.recordEstimateSnapshot(insertedTicket.id, estimateResult);
+                .where(eq(tickets.id, reservation.id));
+            await responseTimeService.recordEstimateSnapshot(reservation.id, estimateResult);
             logger.info('Ticket channel created', {
                 userId: user.id,
                 guildId: guild.id,
@@ -152,6 +182,11 @@ export class TicketService {
 
             await channel.send({
                 content,
+                allowedMentions: {
+                    users: [user.id],
+                    roles: option.pingCustomRoleId ? [option.pingCustomRoleId] : [],
+                    parse: option.pingHere || option.pingEveryone ? ['everyone'] : [],
+                },
                 embeds: [embed],
                 components: [this.openTicketControls()],
             });
@@ -164,8 +199,11 @@ export class TicketService {
                 );
             }
 
+            await db.update(tickets).set({ status: 'open' }).where(eq(tickets.id, reservation.id));
             return channel;
         } catch (error) {
+            await this.cleanupIncompleteTicket(reservation, guild, channel);
+
             logger.error('Failed to create ticket', {
                 userId: user.id,
                 guildId: guild.id,
@@ -173,6 +211,8 @@ export class TicketService {
                 error,
             });
             throw error;
+        } finally {
+            this.creating.delete(reservation.id);
         }
     }
 
@@ -192,10 +232,19 @@ export class TicketService {
             };
         }
 
-        await db
+        const claimed = await db
             .update(tickets)
             .set({ claimedBy: claimer.id })
-            .where(eq(tickets.channelId, channel.id));
+            .where(
+                and(
+                    eq(tickets.id, ticket.id),
+                    or(isNull(tickets.claimedBy), eq(tickets.claimedBy, claimer.id)),
+                ),
+            )
+            .returning()
+            .get();
+        if (!claimed)
+            return { success: false, message: 'Otro miembro ya ha reclamado este ticket.' };
 
         await channel.send(`📌 Ticket reclamado por ${claimer.toString()}.`);
         return { success: true, message: 'Ticket reclamado.' };
@@ -237,36 +286,31 @@ export class TicketService {
         closer: User,
         reason: string = 'No reason provided.',
     ): Promise<void> {
-        const ticket = await this.requireTicket(channel);
-        const now = new Date();
+        return lifecycle.run(channel.id, () => this.close(channel, closer, reason));
+    }
 
-        await db
-            .update(tickets)
+    private async close(channel: TextChannel, closer: User, reason: string): Promise<void> {
+        const ticket = await this.requireTicket(channel);
+        if (ticket.status === 'closed') return;
+        // A failed or oversized export must leave the ticket open and recoverable.
+        const transcript = await this.generateTranscript(channel);
+        await this.sendTranscriptToLog(channel, ticket, closer, reason, transcript);
+        await channel.permissionOverwrites.edit(ticket.userId, {
+            ViewChannel: true,
+            SendMessages: false,
+            AttachFiles: false,
+        });
+        db.update(tickets)
             .set({
                 status: 'closed',
-                closedAt: now,
+                closedAt: new Date(),
                 closedBy: closer.id,
                 closeReason: reason,
             })
-            .where(eq(tickets.channelId, channel.id));
+            .where(eq(tickets.channelId, channel.id))
+            .run();
 
-        await channel.permissionOverwrites
-            .edit(ticket.userId, {
-                ViewChannel: true,
-                SendMessages: false,
-                AttachFiles: false,
-            })
-            .catch((error) => {
-                logger.warn('Failed to update ticket owner permissions while closing ticket', {
-                    channelId: channel.id,
-                    ticketOwnerId: ticket.userId,
-                    closedBy: closer.id,
-                    error,
-                });
-            });
-        const transcript = await this.generateTranscript(channel);
         await this.sendTranscriptToOwner(channel, ticket, closer, reason, transcript);
-        await this.sendTranscriptToLog(channel, ticket, closer, reason, transcript);
 
         await channel.send({
             content: `🔒 Ticket cerrado por ${closer.toString()}.\n**Motivo:** ${reason}`,
@@ -276,18 +320,43 @@ export class TicketService {
     }
 
     async reopenTicket(channel: TextChannel, actor: User): Promise<void> {
-        const ticket = await this.requireTicket(channel);
+        return lifecycle.run(channel.id, () => this.reopen(channel, actor));
+    }
 
-        await db
-            .update(tickets)
-            .set({
-                status: 'open',
-                closedAt: null,
-                closedBy: null,
-                closeReason: null,
-                deletedAt: null,
-            })
-            .where(eq(tickets.channelId, channel.id));
+    private async reopen(channel: TextChannel, actor: User): Promise<void> {
+        const ticket = await this.requireTicket(channel);
+        if (ticket.status === 'open') return;
+
+        db.transaction((tx) => {
+            const current = tx.select().from(tickets).where(eq(tickets.id, ticket.id)).get();
+            if (!current || !['open', 'closed'].includes(current.status))
+                throw new Error('Ticket is not active');
+            if (current.status === 'closed') {
+                const occupied = tx
+                    .select({ value: count() })
+                    .from(tickets)
+                    .where(
+                        and(
+                            eq(tickets.userId, ticket.userId),
+                            inArray(tickets.status, ['open', 'creating', 'creation_failed']),
+                        ),
+                    )
+                    .get();
+                if ((occupied?.value ?? 0) >= config.tickets.maxOpenPerUser) {
+                    throw new Error('Open ticket limit reached');
+                }
+            }
+            tx.update(tickets)
+                .set({
+                    status: 'open',
+                    closedAt: null,
+                    closedBy: null,
+                    closeReason: null,
+                    deletedAt: null,
+                })
+                .where(eq(tickets.id, ticket.id))
+                .run();
+        });
 
         await channel.permissionOverwrites
             .edit(ticket.userId, {
@@ -296,12 +365,17 @@ export class TicketService {
                 AttachFiles: true,
             })
             .catch((error) => {
-                logger.warn('Failed to restore ticket owner permissions while reopening ticket', {
-                    channelId: channel.id,
-                    ticketOwnerId: ticket.userId,
-                    reopenedBy: actor.id,
-                    error,
-                });
+                db.update(tickets)
+                    .set({
+                        status: ticket.status,
+                        closedAt: ticket.closedAt,
+                        closedBy: ticket.closedBy,
+                        closeReason: ticket.closeReason,
+                        deletedAt: ticket.deletedAt,
+                    })
+                    .where(eq(tickets.id, ticket.id))
+                    .run();
+                throw error;
             });
 
         await channel.send({
@@ -315,57 +389,123 @@ export class TicketService {
         actor: User,
         reason: string = 'Ticket deleted.',
     ): Promise<void> {
+        return lifecycle.run(channel.id, () => this.remove(channel, actor, reason));
+    }
+
+    private async remove(channel: TextChannel, actor: User, reason: string): Promise<void> {
         const ticket = await this.requireTicket(channel);
         const transcript = await this.generateTranscript(channel);
 
         await this.sendTranscriptToLog(channel, ticket, actor, reason, transcript);
 
-        await db
-            .update(tickets)
-            .set({
-                status: 'deleted',
-                deletedAt: new Date(),
-            })
-            .where(eq(tickets.channelId, channel.id));
-
         await channel.send({
-            content: `🗑️ Ticket eliminado por ${actor.toString()}. El canal se borrará en 5 segundos.`,
+            content: `🗑️ Eliminando ticket por ${actor.toString()}. La transcripción se ha archivado.`,
             files: [this.transcriptFile(channel, transcript)],
         });
-
-        setTimeout(() => {
-            void channel.delete(`Ticket deleted by ${actor.tag}`).catch((error) => {
-                logger.error('Failed to delete ticket channel', {
-                    channelId: channel.id,
-                    deletedBy: actor.id,
-                    error,
-                });
-            });
-        }, 5000);
+        await channel.delete(`Ticket deleted by ${actor.tag}`);
+        // Preserve a retryable ticket when Discord rejects deletion.
+        db.update(tickets)
+            .set({ status: 'deleted', deletedAt: new Date() })
+            .where(eq(tickets.channelId, channel.id))
+            .run();
     }
 
     async generateTranscript(channel: TextChannel): Promise<string> {
-        const messages = await channel.messages.fetch({ limit: 100 });
-        const sortedMessages = messages.reverse();
-
-        let transcript = `Transcript for ${channel.name}\nGenerated at ${new Date().toISOString()}\n\n`;
-
-        sortedMessages.forEach((msg) => {
-            const time = msg.createdAt.toISOString();
-            const author = msg.author.tag;
-            const content = msg.content || '[no text content]';
-            transcript += `[${time}] ${author}: ${content}\n`;
-            if (msg.attachments.size > 0) {
-                transcript += `[Attachments]: ${msg.attachments.map((a) => a.url).join(', ')}\n`;
+        const lines: string[][] = [];
+        const header = `Transcript for ${channel.name}\nGenerated at ${new Date().toISOString()}\n\n`;
+        let bytes = Buffer.byteLength(header, 'utf8');
+        let pages = 0;
+        let before: string | undefined;
+        while (true) {
+            if (++pages > transcriptPageLimit)
+                throw new Error(
+                    'Transcript exceeds 10,000 messages; export it manually before closing or deleting.',
+                );
+            const messages = await channel.messages.fetch({ limit: 100, before, cache: false });
+            if (messages.size === 0) break;
+            lines.unshift(
+                [...messages.values()].reverse().map((msg) => {
+                    const attachments =
+                        msg.attachments.size > 0
+                            ? `\n[Attachments]: ${msg.attachments.map((a) => a.url).join(', ')}`
+                            : '';
+                    const line = `[${msg.createdAt.toISOString()}] ${msg.author.tag}: ${msg.content || '[no text content]'}${attachments}\n`;
+                    bytes += Buffer.byteLength(line, 'utf8');
+                    if (bytes > transcriptByteLimit)
+                        throw new Error(
+                            'Transcript exceeds the 8 MiB export budget; export it manually before closing or deleting.',
+                        );
+                    return line;
+                }),
+            );
+            const oldest = messages.last()!.id;
+            if (oldest === before) throw new Error('Transcript pagination did not advance');
+            before = oldest;
+            if (messages.size < 100) break;
+            // Permit exactly 10,000 messages while bounding even an endlessly advancing history.
+            if (pages === transcriptPageLimit) {
+                const older = await channel.messages.fetch({ limit: 1, before, cache: false });
+                if (older.size)
+                    throw new Error(
+                        'Transcript exceeds 10,000 messages; export it manually before closing or deleting.',
+                    );
+                break;
             }
-        });
+        }
+        return header + lines.flat().join('');
+    }
 
-        return transcript;
+    async recoverIncompleteTickets(guild: Guild): Promise<void> {
+        const incomplete = db
+            .select()
+            .from(tickets)
+            .where(
+                and(
+                    eq(tickets.guildId, guild.id),
+                    inArray(tickets.status, ['creating', 'creation_failed']),
+                ),
+            )
+            .all();
+        for (const ticket of incomplete) {
+            if (!this.creating.has(ticket.id)) await this.cleanupIncompleteTicket(ticket, guild);
+        }
+    }
+
+    private async cleanupIncompleteTicket(
+        ticket: TicketRecord,
+        guild: Guild,
+        knownChannel?: TextChannel,
+    ) {
+        try {
+            // The topic also finds a channel when Discord accepted create but the response was lost.
+            const channels = knownChannel
+                ? [knownChannel]
+                : [...(await guild.channels.fetch()).values()];
+            const channel = channels.find(
+                (candidate) =>
+                    candidate &&
+                    (candidate.id === ticket.channelId ||
+                        ('topic' in candidate &&
+                            candidate.topic === `snoojote-ticket:${ticket.id}`)),
+            );
+            if (channel) await channel.delete('Incomplete ticket creation rollback');
+            await db.delete(tickets).where(eq(tickets.id, ticket.id));
+        } catch (error) {
+            await db
+                .update(tickets)
+                .set({ status: 'creation_failed' })
+                .where(eq(tickets.id, ticket.id));
+            logger.error('Incomplete ticket requires recovery', {
+                ticketId: ticket.id,
+                guildId: guild.id,
+                error,
+            });
+        }
     }
 
     private async requireTicket(channel: TextChannel): Promise<TicketRecord> {
         const ticket = await this.getTicketByChannel(channel.id);
-        if (!ticket || ticket.status === 'deleted') {
+        if (!ticket || !['open', 'closed'].includes(ticket.status)) {
             throw new Error('This channel is not an active ticket.');
         }
         return ticket;
@@ -459,7 +599,9 @@ export class TicketService {
                 channelId: channel.id,
                 transcriptChannelId: config.channels.transcripts,
             });
-            return;
+            throw new Error(
+                'Ticket transcript log channel is unavailable; the ticket was preserved.',
+            );
         }
 
         try {

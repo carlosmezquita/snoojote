@@ -1,56 +1,52 @@
 import db from '../../../database/db.js';
-import {
-    economyDailyEarnings,
-    economyTransactionLocks,
-    streaks,
-    users,
-} from '../../../database/schema.js';
-import { eq, sql, desc, and, inArray } from 'drizzle-orm';
+import { economyDailyEarnings, streaks, users } from '../../../database/schema.js';
+import { eq, sql, desc, and } from 'drizzle-orm';
 import questService, { type QuestData } from './questService.js';
 import { type DiscordBot } from '../../../core/client.js';
-import { getDailyReward, getSpainDateKey } from '../../streaks/services/streakRules.js';
-import logger from '../../../utils/logger.js';
+import {
+    getDailyReward,
+    getSpainDateKey,
+    isConsecutiveDay,
+    isWithinGracePeriod,
+} from '../../streaks/services/streakRules.js';
 
 export type EconomyEarningSource = 'MESSAGE' | 'VOICE';
-
-const ECONOMY_LOCK_TTL_MS = 2 * 60 * 1000;
-const ECONOMY_LOCK_TIMEOUT_MS = 5_000;
-const ECONOMY_LOCK_RETRY_MS = 25;
+const positiveInteger = (value: number) => Number.isSafeInteger(value) && value > 0;
 
 export function calculateCappedEarning(
     currentAmount: number,
     requestedAmount: number,
     dailyCap: number,
 ): number {
-    if (requestedAmount <= 0 || dailyCap <= 0) return 0;
-    const remaining = Math.max(0, dailyCap - currentAmount);
-    return Math.min(requestedAmount, remaining);
+    if (
+        !Number.isSafeInteger(currentAmount) ||
+        currentAmount < 0 ||
+        !positiveInteger(requestedAmount) ||
+        !positiveInteger(dailyCap)
+    )
+        return 0;
+    return Math.min(requestedAmount, Math.max(0, dailyCap - currentAmount));
 }
 
+// All SQLite write transactions are synchronous. No network await or application
+// lock table belongs inside them; conditional SQL owns the balance invariants.
 export class EconomyService {
     async getBalance(userId: string): Promise<number> {
-        const user = await db
-            .select({ points: users.points })
-            .from(users)
-            .where(eq(users.userId, userId))
-            .get();
-        return user ? user.points : 0;
+        return (
+            db.select({ points: users.points }).from(users).where(eq(users.userId, userId)).get()
+                ?.points ?? 0
+        );
     }
 
     async addBalance(userId: string, amount: number): Promise<void> {
-        try {
-            await this.withEconomyLocks([this.getBalanceLockKey(userId)], async () => {
-                await db
-                    .insert(users)
-                    .values({ userId, points: amount })
-                    .onConflictDoUpdate({
-                        target: users.userId,
-                        set: { points: sql`${users.points} + ${amount}` },
-                    });
-            });
-        } catch (e) {
-            logger.error('Add balance failed', { userId, amount, error: e });
-        }
+        if (!positiveInteger(amount)) throw new Error('Amount must be a positive safe integer');
+        db.insert(users)
+            .values({ userId, points: amount })
+            .onConflictDoUpdate({
+                target: users.userId,
+                set: { points: sql`${users.points} + ${amount}` },
+            })
+            .run();
     }
 
     async addCappedEarning(
@@ -58,298 +54,120 @@ export class EconomyService {
         source: EconomyEarningSource,
         amount: number,
         dailyCap: number,
-        now: Date = new Date(),
+        now = new Date(),
     ): Promise<number> {
-        if (amount <= 0 || dailyCap <= 0) return 0;
-
+        if (!positiveInteger(amount) || !positiveInteger(dailyCap)) return 0;
         const dateKey = getSpainDateKey(now);
-        try {
-            return await this.withEconomyLocks(
-                [
-                    this.getBalanceLockKey(userId),
-                    this.getDailyEarningLockKey(userId, source, dateKey),
-                ],
-                () =>
-                    db.transaction((tx) => {
-                        const existing = tx
-                            .select()
-                            .from(economyDailyEarnings)
-                            .where(
-                                and(
-                                    eq(economyDailyEarnings.userId, userId),
-                                    eq(economyDailyEarnings.dateKey, dateKey),
-                                    eq(economyDailyEarnings.source, source),
-                                ),
-                            )
-                            .get();
-
-                        const currentAmount = existing?.amount ?? 0;
-                        const creditedAmount = calculateCappedEarning(
-                            currentAmount,
-                            amount,
-                            dailyCap,
-                        );
-                        if (creditedAmount <= 0) return 0;
-
-                        tx.insert(users)
-                            .values({ userId, points: creditedAmount })
-                            .onConflictDoUpdate({
-                                target: users.userId,
-                                set: { points: sql`${users.points} + ${creditedAmount}` },
-                            })
-                            .run();
-
-                        if (existing) {
-                            tx.update(economyDailyEarnings)
-                                .set({ amount: currentAmount + creditedAmount })
-                                .where(eq(economyDailyEarnings.id, existing.id))
-                                .run();
-                        } else {
-                            tx.insert(economyDailyEarnings)
-                                .values({
-                                    userId,
-                                    dateKey,
-                                    source,
-                                    amount: creditedAmount,
-                                })
-                                .run();
-                        }
-
-                        return creditedAmount;
-                    }),
-            );
-        } catch (e) {
-            logger.error('Capped earning transaction failed', {
-                userId,
-                source,
-                amount,
-                dailyCap,
-                error: e,
-            });
-            return 0;
-        }
+        return db.transaction(
+            (tx) => {
+                const existing = tx
+                    .select()
+                    .from(economyDailyEarnings)
+                    .where(
+                        and(
+                            eq(economyDailyEarnings.userId, userId),
+                            eq(economyDailyEarnings.dateKey, dateKey),
+                            eq(economyDailyEarnings.source, source),
+                        ),
+                    )
+                    .get();
+                const credited = calculateCappedEarning(existing?.amount ?? 0, amount, dailyCap);
+                if (!credited) return 0;
+                tx.insert(users)
+                    .values({ userId, points: credited })
+                    .onConflictDoUpdate({
+                        target: users.userId,
+                        set: { points: sql`${users.points} + ${credited}` },
+                    })
+                    .run();
+                tx.insert(economyDailyEarnings)
+                    .values({ userId, dateKey, source, amount: credited })
+                    .onConflictDoUpdate({
+                        target: [
+                            economyDailyEarnings.userId,
+                            economyDailyEarnings.dateKey,
+                            economyDailyEarnings.source,
+                        ],
+                        set: { amount: sql`${economyDailyEarnings.amount} + ${credited}` },
+                    })
+                    .run();
+                return credited;
+            },
+            { behavior: 'immediate' },
+        );
     }
 
     async spendBalance(userId: string, amount: number): Promise<boolean> {
-        if (amount <= 0) return false;
-
-        try {
-            return await this.withEconomyLocks([this.getBalanceLockKey(userId)], async () => {
-                return db.transaction((tx) => {
-                    const spendResult = tx
-                        .update(users)
-                        .set({ points: sql`${users.points} - ${amount}` })
-                        .where(and(eq(users.userId, userId), sql`${users.points} >= ${amount}`))
-                        .returning({ userId: users.userId })
-                        .get();
-
-                    if (!spendResult) {
-                        tx.rollback();
-                        return false;
-                    }
-
-                    return true;
-                });
-            });
-        } catch (e) {
-            if (e instanceof Error && e.message.includes('Rollback')) {
-                return false;
-            }
-            logger.error('Spend transaction failed', { userId, amount, error: e });
-            return false;
-        }
+        if (!positiveInteger(amount)) return false;
+        return !!db
+            .update(users)
+            .set({ points: sql`${users.points} - ${amount}` })
+            .where(and(eq(users.userId, userId), sql`${users.points} >= ${amount}`))
+            .returning({ id: users.userId })
+            .get();
     }
 
     async transfer(senderId: string, receiverId: string, amount: number): Promise<boolean> {
-        if (amount <= 0 || senderId === receiverId) return false;
-
-        const lockKeys = [this.getBalanceLockKey(senderId), this.getBalanceLockKey(receiverId)];
-        try {
-            return await this.withEconomyLocks(lockKeys, async () => {
-                return db.transaction((tx) => {
-                    // Conditional update for the sender to ensure atomicity
-                    const debitResult = tx
-                        .update(users)
-                        .set({ points: sql`${users.points} - ${amount}` })
-                        .where(and(eq(users.userId, senderId), sql`${users.points} >= ${amount}`))
-                        .returning({ userId: users.userId })
-                        .get();
-
-                    // If no rows were updated, either the user doesn't exist or they have insufficient funds
-                    if (!debitResult) {
-                        tx.rollback();
-                        return false;
-                    }
-
-                    // If debit was successful, credit the receiver
-                    tx.insert(users)
-                        .values({ userId: receiverId, points: amount })
-                        .onConflictDoUpdate({
-                            target: users.userId,
-                            set: { points: sql`${users.points} + ${amount}` },
-                        })
-                        .run();
-
-                    return true;
-                });
-            });
-        } catch (e) {
-            // tx.rollback() throws a special rollback error that Drizzle catches,
-            // but if it propagates or another error occurs, we catch it here.
-            // Drizzle throws an error to abort the transaction.
-            // If the error message is about rollback, we can return false.
-            if (e instanceof Error && e.message.includes('Rollback')) {
-                return false;
-            }
-            logger.error('Transfer transaction failed', {
-                senderId,
-                receiverId,
-                amount,
-                error: e,
-            });
-            return false;
-        }
-    }
-
-    private async withEconomyLocks<T>(
-        lockKeys: string[],
-        operation: () => T | Promise<T>,
-    ): Promise<T> {
-        const sortedLockKeys = Array.from(new Set(lockKeys)).sort();
-        await this.acquireEconomyLocks(sortedLockKeys);
-
-        try {
-            return await operation();
-        } finally {
-            await this.releaseEconomyLocks(sortedLockKeys);
-        }
-    }
-
-    private async acquireEconomyLocks(lockKeys: string[]): Promise<void> {
-        const deadline = Date.now() + ECONOMY_LOCK_TIMEOUT_MS;
-
-        while (true) {
-            const acquired = this.tryAcquireEconomyLocks(lockKeys);
-            if (acquired) return;
-
-            if (Date.now() >= deadline) {
-                throw new Error(`Timed out acquiring economy locks: ${lockKeys.join(', ')}`);
-            }
-
-            await this.sleep(ECONOMY_LOCK_RETRY_MS);
-        }
-    }
-
-    private tryAcquireEconomyLocks(lockKeys: string[]): boolean {
-        try {
-            const staleBefore = new Date(Date.now() - ECONOMY_LOCK_TTL_MS);
-            return db.transaction((tx) => {
-                tx.delete(economyTransactionLocks)
-                    .where(sql`${economyTransactionLocks.createdAt} < ${staleBefore}`)
+        if (!positiveInteger(amount) || senderId === receiverId) return false;
+        return db.transaction(
+            (tx) => {
+                const debit = tx
+                    .update(users)
+                    .set({ points: sql`${users.points} - ${amount}` })
+                    .where(and(eq(users.userId, senderId), sql`${users.points} >= ${amount}`))
+                    .returning()
+                    .get();
+                if (!debit) return false;
+                tx.insert(users)
+                    .values({ userId: receiverId, points: amount })
+                    .onConflictDoUpdate({
+                        target: users.userId,
+                        set: { points: sql`${users.points} + ${amount}` },
+                    })
                     .run();
-
-                for (const lockKey of lockKeys) {
-                    const lock = tx
-                        .insert(economyTransactionLocks)
-                        .values({ lockKey })
-                        .onConflictDoNothing()
-                        .returning({ lockKey: economyTransactionLocks.lockKey })
-                        .get();
-
-                    if (!lock) {
-                        tx.rollback();
-                        return false;
-                    }
-                }
-
                 return true;
-            });
-        } catch (e) {
-            if (e instanceof Error && e.message.includes('Rollback')) {
-                return false;
-            }
-            throw e;
-        }
+            },
+            { behavior: 'immediate' },
+        );
     }
 
-    private async releaseEconomyLocks(lockKeys: string[]): Promise<void> {
-        if (lockKeys.length === 0) return;
-        await db
-            .delete(economyTransactionLocks)
-            .where(inArray(economyTransactionLocks.lockKey, lockKeys));
-    }
-
-    private getBalanceLockKey(userId: string): string {
-        return `balance:${userId}`;
-    }
-
-    private getDailyEarningLockKey(
-        userId: string,
-        source: EconomyEarningSource,
-        dateKey: string,
-    ): string {
-        return `daily-earning:${userId}:${source}:${dateKey}`;
-    }
-
-    private async sleep(ms: number): Promise<void> {
-        await new Promise((resolve) => setTimeout(resolve, ms));
-    }
-
-    async getLeaderboard(limit: number = 10): Promise<{ user_id: string; points: number }[]> {
-        const leaderboard = await db
+    async getLeaderboard(limit = 10): Promise<{ user_id: string; points: number }[]> {
+        return db
             .select({ user_id: users.userId, points: users.points })
             .from(users)
             .orderBy(desc(users.points))
-            .limit(limit);
-
-        return leaderboard;
+            .limit(Math.max(1, Math.min(limit, 25)))
+            .all();
     }
 
-    async getCurrentDailyReward(userId: string): Promise<number> {
-        const userStreak = await db
-            .select({ streak: streaks.streak })
-            .from(streaks)
-            .where(eq(streaks.userId, userId))
-            .get();
-
-        return getDailyReward(userStreak?.streak ?? 0);
+    async getCurrentDailyReward(userId: string, now = new Date()): Promise<number> {
+        return getDailyReward(
+            activeStreak(db.select().from(streaks).where(eq(streaks.userId, userId)).get(), now),
+        );
     }
 
-    async getDailyQuest(userId: string, client: DiscordBot): Promise<QuestData> {
-        const user = await db.select().from(users).where(eq(users.userId, userId)).get();
-
-        if (!user) {
-            return questService.generateQuest(client);
-        }
-
-        const now = new Date();
-        const lastActivity = user.lastActivityDate;
-
-        const isNewDay =
-            !lastActivity ||
-            lastActivity.getDate() !== now.getDate() ||
-            lastActivity.getMonth() !== now.getMonth();
-
-        if (isNewDay || !user.dailyQuest) {
-            const newQuest = await questService.generateQuest(client);
-            await db
-                .insert(users)
-                .values({
-                    userId,
-                    dailyQuest: newQuest,
-                    lastActivityDate: now,
-                })
-                .onConflictDoUpdate({
-                    target: users.userId,
-                    set: {
-                        dailyQuest: newQuest,
-                        lastActivityDate: now,
-                    },
-                });
-            return newQuest;
-        }
-
-        return user.dailyQuest as QuestData;
+    async getDailyQuest(userId: string, client: DiscordBot, now = new Date()): Promise<QuestData> {
+        return db.transaction(
+            (tx) => {
+                const user = tx.select().from(users).where(eq(users.userId, userId)).get();
+                if (
+                    user?.dailyQuest &&
+                    user.lastActivityDate &&
+                    getSpainDateKey(user.lastActivityDate) === getSpainDateKey(now)
+                )
+                    return user.dailyQuest as QuestData;
+                const quest = questService.generateQuest(client, userId);
+                tx.insert(users)
+                    .values({ userId, dailyQuest: quest, lastActivityDate: now })
+                    .onConflictDoUpdate({
+                        target: users.userId,
+                        set: { dailyQuest: quest, lastActivityDate: now },
+                    })
+                    .run();
+                return quest;
+            },
+            { behavior: 'immediate' },
+        );
     }
 
     async updateQuestProgress(
@@ -357,108 +175,82 @@ export class EconomyService {
         type: string,
         increment: number,
         channelId?: string,
+        now = new Date(),
     ): Promise<QuestData | null> {
-        const user = await db.select().from(users).where(eq(users.userId, userId)).get();
-        if (!user || !user.dailyQuest) return null;
-
-        // Clone/create a new object to ensure Drizzle sees it as a new value if that's the issue?
-        // Or simply spread it.
-        const quest: QuestData = { ...(user.dailyQuest as QuestData) };
-
-        if (quest.type !== type) return null;
-        if (quest.isCompleted) return quest;
-
-        if (quest.targetId && quest.targetId !== channelId) return null;
-
-        quest.current += increment;
-
-        // Check completion - this function modifies 'quest' object in place (sets isCompleted = true)
-        questService.checkCompletion(quest);
-
-        await db.update(users).set({ dailyQuest: quest }).where(eq(users.userId, userId));
-
-        return quest;
+        if (!positiveInteger(increment)) return null;
+        return db.transaction(
+            (tx) => {
+                const user = tx.select().from(users).where(eq(users.userId, userId)).get();
+                if (
+                    !user?.dailyQuest ||
+                    !user.lastActivityDate ||
+                    getSpainDateKey(user.lastActivityDate) !== getSpainDateKey(now)
+                )
+                    return null;
+                const quest = { ...(user.dailyQuest as QuestData) };
+                if (
+                    quest.type !== type ||
+                    quest.isCompleted ||
+                    (quest.targetId && quest.targetId !== channelId)
+                )
+                    return null;
+                quest.current = Math.min(quest.goal, quest.current + increment);
+                questService.checkCompletion(quest);
+                tx.update(users).set({ dailyQuest: quest }).where(eq(users.userId, userId)).run();
+                return quest;
+            },
+            { behavior: 'immediate' },
+        );
     }
 
     async claimDaily(
         userId: string,
+        now = new Date(),
     ): Promise<{ success: boolean; message: string; reward?: number }> {
-        try {
-            return db.transaction((tx) => {
+        return db.transaction(
+            (tx) => {
                 const user = tx.select().from(users).where(eq(users.userId, userId)).get();
                 if (!user) return { success: false, message: 'Usuario no encontrado.' };
-
-                const now = new Date();
-                const lastDaily = user.lastDaily;
-
-                if (lastDaily) {
-                    const diff = now.getTime() - lastDaily.getTime();
-                    const hours = diff / (1000 * 60 * 60);
-                    if (hours < 24) {
-                        const remaining = 24 - hours;
-                        const h = Math.floor(remaining);
-                        const m = Math.floor((remaining - h) * 60);
-                        return {
-                            success: false,
-                            message: `Ya reclamada. Vuelve a intentarlo en ${h}h ${m}m.`,
-                        };
-                    }
-                }
-
-                const quest = user.dailyQuest as QuestData;
-
-                if (!quest || !quest.isCompleted) {
-                    return { success: false, message: 'La tarea diaria aún no está completada.' };
-                }
-
-                const userStreak = tx
-                    .select({ streak: streaks.streak })
-                    .from(streaks)
-                    .where(eq(streaks.userId, userId))
-                    .get();
-
-                const reward = getDailyReward(userStreak?.streak ?? 0);
-
-                // Atomic condition check for claimDaily: ensure lastDaily hasn't changed since we read it
-                const updateResult = tx
-                    .update(users)
-                    .set({
-                        points: sql`${users.points} + ${reward}`,
-                        lastDaily: now,
-                    })
-                    .where(
-                        and(
-                            eq(users.userId, userId),
-                            // Depending on lastDaily being null or having a specific timestamp
-                            lastDaily === null
-                                ? sql`last_daily IS NULL`
-                                : eq(users.lastDaily, lastDaily),
-                        ),
-                    )
-                    .returning({ userId: users.userId })
-                    .get();
-
-                if (!updateResult) {
-                    tx.rollback();
+                if (user.lastDaily && now.getTime() - user.lastDaily.getTime() < 86_400_000) {
+                    const remaining = Math.ceil(
+                        (86_400_000 - (now.getTime() - user.lastDaily.getTime())) / 60_000,
+                    );
                     return {
                         success: false,
-                        message: 'No se pudo reclamar, posible solicitud simultánea.',
+                        message: `Ya reclamada. Vuelve a intentarlo en ${Math.floor(remaining / 60)}h ${remaining % 60}m.`,
                     };
                 }
-
+                const quest = user.dailyQuest as QuestData | null;
+                if (
+                    !quest?.isCompleted ||
+                    !user.lastActivityDate ||
+                    getSpainDateKey(user.lastActivityDate) !== getSpainDateKey(now)
+                ) {
+                    return { success: false, message: 'La tarea diaria aún no está completada.' };
+                }
+                const reward = getDailyReward(
+                    activeStreak(
+                        tx.select().from(streaks).where(eq(streaks.userId, userId)).get(),
+                        now,
+                    ),
+                );
+                tx.update(users)
+                    .set({ points: sql`${users.points} + ${reward}`, lastDaily: now })
+                    .where(eq(users.userId, userId))
+                    .run();
                 return { success: true, message: 'Recompensa diaria reclamada.', reward };
-            });
-        } catch (e) {
-            if (e instanceof Error && e.message.includes('Rollback')) {
-                return {
-                    success: false,
-                    message: 'No se pudo reclamar, posible solicitud simultánea.',
-                };
-            }
-            logger.error('Claim daily transaction failed', { userId, error: e });
-            return { success: false, message: 'Ha ocurrido un error.' };
-        }
+            },
+            { behavior: 'immediate' },
+        );
     }
 }
-
+function activeStreak(streak: typeof streaks.$inferSelect | undefined, now: Date): number {
+    if (!streak) return 0;
+    const today = getSpainDateKey(now);
+    return streak.lastStreakDate === today ||
+        isConsecutiveDay(streak.lastStreakDate, today) ||
+        isWithinGracePeriod(streak.lastStreakAt, now)
+        ? streak.streak
+        : 0;
+}
 export default new EconomyService();

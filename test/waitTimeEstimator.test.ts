@@ -16,7 +16,7 @@ const minutes = (value: number) => value * 60 * 1000;
 const answeredTicket = (
     createdAt: string,
     responseMinutes: number,
-    context?: { staffCapacityAtCreation?: number; openTicketsAtCreation?: number },
+    context?: { staffCapacityAtCreation?: number; unansweredTicketsAtCreation?: number },
 ) => ({
     createdAt: new Date(createdAt),
     firstResponseAt: new Date(new Date(createdAt).getTime() + minutes(responseMinutes)),
@@ -172,11 +172,11 @@ describe('waitTimeEstimator', () => {
         const allTickets = [
             answeredTicket('2026-05-12T11:00:00Z', 30, {
                 staffCapacityAtCreation: 1,
-                openTicketsAtCreation: 0,
+                unansweredTicketsAtCreation: 0,
             }),
             answeredTicket('2026-05-12T10:00:00Z', 30, {
                 staffCapacityAtCreation: 1,
-                openTicketsAtCreation: 0,
+                unansweredTicketsAtCreation: 0,
             }),
         ];
 
@@ -233,11 +233,11 @@ describe('waitTimeEstimator', () => {
         const allTickets = [
             answeredTicket('2026-05-12T11:00:00Z', 10, {
                 staffCapacityAtCreation: 2,
-                openTicketsAtCreation: 1,
+                unansweredTicketsAtCreation: 1,
             }),
             answeredTicket('2026-05-12T10:00:00Z', 10, {
                 staffCapacityAtCreation: 2,
-                openTicketsAtCreation: 1,
+                unansweredTicketsAtCreation: 1,
             }),
         ];
         const baseInput = {

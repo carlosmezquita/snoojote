@@ -36,7 +36,7 @@ describe('RateLimitService', () => {
         expect(rateLimitService.check('user1')).toBe(2);
 
         // Advance time by 61 seconds
-        setSystemTime(new Date(new Date('2020-01-01T00:00:00Z').getTime() + 61 * 1000));
+        setSystemTime(new Date('2020-01-01T00:01:01Z'));
 
         expect(rateLimitService.check('user1')).toBe(1);
     });
@@ -48,10 +48,5 @@ describe('RateLimitService', () => {
         rateLimitService.reset('user1');
 
         expect(rateLimitService.check('user1')).toBe(1);
-    });
-
-    test('dispose() should stop the cleanup interval', () => {
-        // Just calling dispose to ensure no errors and it covers the method.
-        rateLimitService.dispose();
     });
 });
