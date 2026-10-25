@@ -1,3 +1,4 @@
+export const permissionLevel = 'admin' as const;
 import {
     SlashCommandBuilder,
     type ChatInputCommandInteraction,
@@ -29,8 +30,12 @@ export const execute = async (interaction: ChatInputCommandInteraction, client: 
     }
 
     try {
-        await triviaService.processDailyQuestion(channel, client);
-        await interaction.editReply('Daily question triggered successfully.');
+        const sent = await triviaService.processDailyQuestion(channel, client);
+        await interaction.editReply(
+            sent
+                ? 'Daily question sent.'
+                : 'No question sent; it may already be posted or require attention in the logs.',
+        );
     } catch (error) {
         client.logger.error(`Error triggering daily question: ${error}`);
         await interaction.editReply('Failed to trigger daily question.');

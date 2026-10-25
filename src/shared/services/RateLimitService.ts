@@ -22,6 +22,7 @@ export class RateLimitService {
                 }
             }
         }, 30000);
+        this.cleanupInterval.unref();
     }
 
     /**

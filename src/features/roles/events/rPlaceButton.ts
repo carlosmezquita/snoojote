@@ -1,47 +1,52 @@
 import { Events, type Interaction } from 'discord.js';
 import { type DiscordBot } from '../../../core/client.js';
-
 import { config } from '../../../config.js';
+import { isSafeSelfAssignableRole } from '../../../shared/utils/roles.js';
+import { Cooldown } from '../../../shared/services/Cooldown.js';
 
-const ROLE_ID = config.roles.rPlace;
-
+const cooldown = new Cooldown();
 export const name = Events.InteractionCreate;
 export const once = false;
-
 export const execute = async (interaction: Interaction, client: DiscordBot) => {
-    if (!interaction.isButton()) return;
-    if (interaction.customId !== 'give_rplace2023_role') return;
-
-    if (!interaction.inGuild() || !interaction.member) return;
-
-    const member = await interaction.guild?.members.fetch(interaction.user.id);
-    if (!member) return;
-
+    if (
+        !interaction.isButton() ||
+        interaction.customId !== 'give_rplace2023_role' ||
+        !interaction.guild
+    )
+        return;
+    if (!cooldown.acquire(`${interaction.guildId}:${interaction.user.id}`, 2000)) {
+        await interaction.reply({
+            content: 'Espera unos segundos antes de volver a cambiar el rol.',
+            ephemeral: true,
+        });
+        return;
+    }
+    await interaction.deferReply({ ephemeral: true });
     try {
-        if (member.roles.cache.has(ROLE_ID)) {
-            await member.roles.remove(ROLE_ID);
-            client.logger.info('Removed rPlace role from member', {
-                userId: member.id,
-                guildId: interaction.guildId,
-                roleId: ROLE_ID,
-            });
-            await interaction.reply({ content: 'Rol eliminado correctamente.', ephemeral: true });
-        } else {
-            await member.roles.add(ROLE_ID);
-            client.logger.info('Added rPlace role to member', {
-                userId: member.id,
-                guildId: interaction.guildId,
-                roleId: ROLE_ID,
-            });
-            await interaction.reply({ content: 'Rol añadido correctamente.', ephemeral: true });
+        const roleId = config.roles.rPlace;
+        const role =
+            interaction.guild.roles.cache.get(roleId) ??
+            (await interaction.guild.roles.fetch(roleId));
+        if (!isSafeSelfAssignableRole(role)) {
+            await interaction.editReply('Este rol no está disponible. Contacta con el equipo.');
+            return;
         }
+        const member = await interaction.guild.members.fetch({
+            user: interaction.user.id,
+            force: true,
+        });
+        const removing = member.roles.cache.has(roleId);
+        if (removing) await member.roles.remove(roleId);
+        else await member.roles.add(roleId);
+        await interaction.editReply(
+            removing ? 'Rol eliminado correctamente.' : 'Rol añadido correctamente.',
+        );
     } catch (error) {
         client.logger.error('Failed to toggle rPlace role', {
-            userId: member.id,
+            userId: interaction.user.id,
             guildId: interaction.guildId,
-            roleId: ROLE_ID,
             error,
         });
-        await interaction.reply({ content: 'Error al gestionar el rol.', ephemeral: true });
+        await interaction.editReply('Error al gestionar el rol.');
     }
 };
