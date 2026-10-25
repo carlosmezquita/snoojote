@@ -25,6 +25,7 @@ const logFormat = winston.format.printf(({ level, message, timestamp, stack, ...
 });
 
 const logger = winston.createLogger({
+    silent: process.env.NODE_ENV === 'test',
     level: process.env.LOG_LEVEL || 'info',
     format: winston.format.combine(
         winston.format.errors({ stack: true }),
