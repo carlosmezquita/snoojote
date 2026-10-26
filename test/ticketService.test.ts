@@ -1,6 +1,6 @@
 import { afterEach, describe, expect, test } from 'bun:test';
 import { randomUUID } from 'crypto';
-import { Collection, type Guild, type TextChannel, type User } from 'discord.js';
+import { Collection, EmbedBuilder, type Guild, type TextChannel, type User } from 'discord.js';
 import { eq } from 'drizzle-orm';
 import db from '../src/database/db.js';
 import { tickets } from '../src/database/schema.js';
@@ -8,6 +8,7 @@ import { config } from '../src/config.js';
 import { TicketService } from '../src/features/tickets/services/ticketService.js';
 import { type TicketOptionConfig } from '../src/features/tickets/config/TicketConfig.js';
 import { estimateWaitTime } from '../src/features/tickets/services/waitTimeEstimator.js';
+import { ResponseTimeService } from '../src/features/tickets/services/responseTimeService.js';
 
 const userIds: string[] = [];
 const originalLimit = config.tickets.maxOpenPerUser;
@@ -96,6 +97,53 @@ function fixture() {
 }
 
 describe('ticket creation reservations and rollback', () => {
+    test('does not announce or save a new ETA when staff already replied during initialization', async () => {
+        const f = fixture();
+        let snapshots = 0;
+        let welcomeText = '';
+        f.responses.recordEstimateSnapshot = async () => {
+            snapshots++;
+        };
+        f.responses.getStaffCapacity = async () => {
+            await new ResponseTimeService().recordResponse(
+                f.rows()[0].id,
+                'staff',
+                new Date(),
+                'early-staff-message',
+            );
+            f.channels[0].send = async (message: { embeds: EmbedBuilder[] }) => {
+                welcomeText = message.embeds[0].data.description ?? '';
+            };
+            return { activeCount: 1, weightedCapacity: 1 };
+        };
+        await f
+            .service()
+            .createTicket(f.user, f.guild, f.option, [
+                { question: 'Reason', answer: 'Keep the form answer' },
+            ]);
+        expect(snapshots).toBe(0);
+        expect(welcomeText).not.toContain('Estimación orientativa');
+        expect(welcomeText).toContain('Keep the form answer');
+    });
+    test('simultaneous tickets include other pending creations in each queue snapshot', async () => {
+        const f = fixture();
+        const responseTimes = new ResponseTimeService();
+        const service = new TicketService({
+            ...f.responses,
+            getOpenTicketCount: responseTimes.getOpenTicketCount.bind(responseTimes),
+            getUnansweredQueueLength: responseTimes.getUnansweredQueueLength.bind(responseTimes),
+        } as never);
+        const users = Array.from({ length: 5 }, () => ({ ...f.user, id: randomUUID() }) as User);
+        userIds.push(...users.map((user) => user.id));
+        await Promise.all(users.map((user) => service.createTicket(user, f.guild, f.option, [])));
+        const rows = db
+            .select()
+            .from(tickets)
+            .all()
+            .filter((row) => users.some((user) => user.id === row.userId));
+        expect(rows).toHaveLength(5);
+        expect(rows.map((row) => row.unansweredTicketsAtCreation)).toEqual([4, 4, 4, 4, 4]);
+    });
     test('reopening cannot bypass capacity occupied by another open ticket', async () => {
         const f = fixture();
         await f.service().createTicket(f.user, f.guild, f.option, []);
@@ -197,6 +245,30 @@ describe('ticket creation reservations and rollback', () => {
 });
 
 describe('complete ticket transcripts', () => {
+    test('preserves opening form answers, announced estimates, and stable message identity', async () => {
+        const opening = {
+            id: 'message-1',
+            createdAt: new Date('2026-01-01T00:00:00Z'),
+            author: { id: 'bot-id', tag: 'bot', bot: true },
+            content: '<@requester>',
+            attachments: new Collection(),
+            embeds: [
+                new EmbedBuilder()
+                    .setTitle('Support request')
+                    .setDescription('Estimate: 15 minutes\nReason: my test question')
+                    .addFields({ name: 'Details', value: 'line one\nline two' }),
+            ],
+        };
+        const channel = {
+            name: 'ticket',
+            messages: { fetch: async () => new Collection([[opening.id, opening]]) },
+        } as unknown as TextChannel;
+        const transcript = await new TicketService().generateTranscript(channel);
+        expect(transcript).toContain('my test question');
+        expect(transcript).toContain('Estimate: 15 minutes');
+        expect(transcript).toContain('line one\\nline two');
+        expect(transcript).toContain('"messageId":"message-1","authorId":"bot-id","bot":true');
+    });
     test('paginates all messages in chronological order, including attachments', async () => {
         const records = Array.from({ length: 250 }, (_, index) => ({
             id: String(index + 1),
@@ -308,6 +380,60 @@ describe('ticket lifecycle safety', () => {
         );
         expect(f.archives()).toBe(1);
         expect(f.rows()[0].status).toBe('closed');
+        expect(f.rows()[0].waitOutcome).toBe('requester_closed');
+        expect(f.rows()[0].waitEndedAt).toEqual(f.rows()[0].closedAt);
+    });
+
+    test('reopening cannot relabel a cancelled initial wait as an answered ticket', async () => {
+        const f = lifecycleFixture();
+        await f.service().closeTicket(f.channel, f.user);
+        const endedAt = f.rows()[0].waitEndedAt;
+        await f.service().reopenTicket(f.channel, f.user);
+        await new ResponseTimeService().recordResponse(
+            f.rows()[0].id,
+            'staff',
+            new Date(),
+            'late-reply',
+        );
+        expect(f.rows()[0].status).toBe('open');
+        expect(f.rows()[0].firstResponseBy).toBe('staff');
+        expect(f.rows()[0].waitOutcome).toBe('requester_closed');
+        expect(f.rows()[0].waitEndedAt).toEqual(endedAt);
+    });
+
+    test('records staff closures and direct deletions without inventing responses', async () => {
+        const closed = lifecycleFixture();
+        await closed.service().closeTicket(closed.channel, {
+            id: 'staff',
+            toString: () => 'staff',
+        } as unknown as User);
+        expect(closed.rows()[0].waitOutcome).toBe('staff_closed');
+        const deleted = lifecycleFixture();
+        await deleted.service().deleteTicket(deleted.channel, deleted.user);
+        expect(deleted.rows()[0].waitOutcome).toBe('deleted');
+        expect(deleted.rows()[0].waitEndedAt).toEqual(deleted.rows()[0].deletedAt);
+        expect(deleted.rows()[0].firstResponseAt).toBeNull();
+    });
+
+    test('retains known legacy closure boundaries through reopen and deletion', async () => {
+        for (const reopen of [true, false]) {
+            const f = lifecycleFixture();
+            const closedAt = new Date(Date.now() - 60_000);
+            db.update(tickets)
+                .set({
+                    status: 'closed',
+                    createdAt: new Date(closedAt.getTime() - 60_000),
+                    closedAt,
+                    closedBy: f.user.id,
+                })
+                .where(eq(tickets.channelId, f.channel.id))
+                .run();
+            const boundary = f.rows()[0].closedAt;
+            if (reopen) await f.service().reopenTicket(f.channel, f.user);
+            else await f.service().deleteTicket(f.channel, f.user);
+            expect(f.rows()[0].waitOutcome).toBe('requester_closed');
+            expect(f.rows()[0].waitEndedAt).toEqual(boundary);
+        }
     });
 
     test('an unavailable archive preserves the ticket for close and delete retries', async () => {
@@ -327,6 +453,7 @@ describe('ticket lifecycle safety', () => {
         );
         expect(f.rows()[0].status).toBe('open');
         expect(f.rows()[0].deletedAt).toBeNull();
+        expect(f.rows()[0].waitOutcome).toBeNull();
         expect(f.archives()).toBe(1);
     });
 

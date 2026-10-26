@@ -23,6 +23,7 @@ import { getTicketStaffRoleIds } from '../utils/ticketStaff.js';
 import { randomUUID } from 'crypto';
 import responseTimeService from './responseTimeService.js';
 import { SerialQueue } from '../../../shared/services/SerialQueue.js';
+import { finishInitialWait, preserveLegacyWaitBoundary } from './ticketWaitLifecycle.js';
 
 // Shared across service instances; lifecycle operations must not interleave Discord side effects.
 const lifecycle = new SerialQueue();
@@ -133,8 +134,14 @@ export class TicketService {
             });
             const staffOnlineAtCreation = staffCapacity.activeCount;
             const staffCapacityAtCreation = staffCapacity.weightedCapacity;
-            const openTicketsAtCreation = await responseTimeService.getOpenTicketCount();
-            const unansweredQueueLength = await responseTimeService.getUnansweredQueueLength();
+            const openTicketsAtCreation = await responseTimeService.getOpenTicketCount(
+                guild.id,
+                reservation.id,
+            );
+            const unansweredQueueLength = await responseTimeService.getUnansweredQueueLength(
+                guild.id,
+                reservation.id,
+            );
             const estimateResult = await responseTimeService.createEstimate(
                 guild,
                 unansweredQueueLength,
@@ -149,7 +156,6 @@ export class TicketService {
                     unansweredTicketsAtCreation: unansweredQueueLength,
                 })
                 .where(eq(tickets.id, reservation.id));
-            await responseTimeService.recordEstimateSnapshot(reservation.id, estimateResult);
             logger.info('Ticket channel created', {
                 userId: user.id,
                 guildId: guild.id,
@@ -162,13 +168,20 @@ export class TicketService {
             });
 
             const estimate = formatDuration(estimateResult.estimatedMs);
+            const current = await this.getTicketByChannel(channel.id);
+            const showEstimate = !current?.firstResponseAt && !current?.waitOutcome;
+            const waitMessage = showEstimate
+                ? `**Estimación orientativa de primera respuesta:** ${estimate}\n` +
+                  '*El equipo es voluntario; puede tardar más. No es un plazo garantizado.*\n\n'
+                : '';
 
             const embed = createEmbed(
                 option.openMessage || `Ticket de ${user.username}`,
                 option.ticketWelcomeMessage +
                     '\n\n' +
-                    `**Tiempo estimado de respuesta:** ${estimate}\n\n` +
-                    modalData.map((d) => `**${d.question}**\n${d.answer}`).join('\n\n'),
+                    waitMessage +
+                    modalData.map((d) => `**${d.question}**\n${d.answer}`).join('\n\n') +
+                    '\n\nEscribe en este canal para hablar con el equipo. Usa «Cerrar solicitud» solo cuando ya no necesites ayuda.',
                 Colors.Info,
             );
 
@@ -180,7 +193,8 @@ export class TicketService {
             if (option.pingEveryone) content += ' @everyone';
             if (option.pingCustomRoleId) content += ` <@&${option.pingCustomRoleId}>`;
 
-            await channel.send({
+            const issuedAt = new Date();
+            const welcome = await channel.send({
                 content,
                 allowedMentions: {
                     users: [user.id],
@@ -190,6 +204,12 @@ export class TicketService {
                 embeds: [embed],
                 components: [this.openTicketControls()],
             });
+            if (showEstimate)
+                await responseTimeService.recordEstimateSnapshot(
+                    reservation.id,
+                    estimateResult,
+                    welcome?.createdAt ?? issuedAt,
+                );
 
             if (option.enableDmOnOpen) {
                 await DMService.sendNeutral(
@@ -300,15 +320,24 @@ export class TicketService {
             SendMessages: false,
             AttachFiles: false,
         });
-        db.update(tickets)
-            .set({
-                status: 'closed',
-                closedAt: new Date(),
-                closedBy: closer.id,
-                closeReason: reason,
-            })
-            .where(eq(tickets.channelId, channel.id))
-            .run();
+        const closedAt = new Date();
+        db.transaction((tx) => {
+            tx.update(tickets)
+                .set({
+                    status: 'closed',
+                    closedAt,
+                    closedBy: closer.id,
+                    closeReason: reason,
+                })
+                .where(eq(tickets.channelId, channel.id))
+                .run();
+            finishInitialWait(
+                ticket.id,
+                closer.id === ticket.userId ? 'requester_closed' : 'staff_closed',
+                closedAt,
+                tx,
+            );
+        });
 
         await this.sendTranscriptToOwner(channel, ticket, closer, reason, transcript);
 
@@ -345,6 +374,7 @@ export class TicketService {
                 if ((occupied?.value ?? 0) >= config.tickets.maxOpenPerUser) {
                     throw new Error('Open ticket limit reached');
                 }
+                preserveLegacyWaitBoundary(current, tx);
             }
             tx.update(tickets)
                 .set({
@@ -404,15 +434,33 @@ export class TicketService {
         });
         await channel.delete(`Ticket deleted by ${actor.tag}`);
         // Preserve a retryable ticket when Discord rejects deletion.
-        db.update(tickets)
-            .set({ status: 'deleted', deletedAt: new Date() })
-            .where(eq(tickets.channelId, channel.id))
-            .run();
+        const deletedAt = new Date();
+        db.transaction((tx) => {
+            preserveLegacyWaitBoundary(ticket, tx);
+            tx.update(tickets)
+                .set({ status: 'deleted', deletedAt })
+                .where(eq(tickets.channelId, channel.id))
+                .run();
+            finishInitialWait(ticket.id, 'deleted', deletedAt, tx);
+        });
     }
 
     async generateTranscript(channel: TextChannel): Promise<string> {
         const lines: string[][] = [];
-        const header = `Transcript for ${channel.name}\nGenerated at ${new Date().toISOString()}\n\n`;
+        const ticket = channel.id ? await this.getTicketByChannel(channel.id) : undefined;
+        const metadata = ticket
+            ? `Ticket metadata: ${JSON.stringify({
+                  ticketId: ticket.id,
+                  channelId: ticket.channelId,
+                  optionId: ticket.optionId,
+                  createdAt: ticket.createdAt,
+                  firstResponseAt: ticket.firstResponseAt,
+                  waitOutcome: ticket.waitOutcome,
+                  waitEndedAt: ticket.waitEndedAt,
+                  requesterUnavailableAt: ticket.requesterUnavailableAt,
+              })}\n`
+            : '';
+        const header = `Transcript for ${channel.name}\nGenerated at ${new Date().toISOString()}\n${metadata}\n`;
         let bytes = Buffer.byteLength(header, 'utf8');
         let pages = 0;
         let before: string | undefined;
@@ -429,7 +477,17 @@ export class TicketService {
                         msg.attachments.size > 0
                             ? `\n[Attachments]: ${msg.attachments.map((a) => a.url).join(', ')}`
                             : '';
-                    const line = `[${msg.createdAt.toISOString()}] ${msg.author.tag}: ${msg.content || '[no text content]'}${attachments}\n`;
+                    // Form answers and the announced estimate are in the opening embed.
+                    const embeds = msg.embeds?.length
+                        ? `\n[Embeds]: ${JSON.stringify(msg.embeds.map((embed) => embed.toJSON()))}`
+                        : '';
+                    const identity = `\n[Message metadata]: ${JSON.stringify({
+                        messageId: msg.id,
+                        authorId: msg.author.id,
+                        bot: msg.author.bot,
+                        editedAt: msg.editedAt,
+                    })}`;
+                    const line = `[${msg.createdAt.toISOString()}] ${msg.author.tag}: ${msg.content || '[no text content]'}${attachments}${embeds}${identity}\n`;
                     bytes += Buffer.byteLength(line, 'utf8');
                     if (bytes > transcriptByteLimit)
                         throw new Error(
@@ -515,7 +573,7 @@ export class TicketService {
         return new ActionRowBuilder<ButtonBuilder>().addComponents(
             new ButtonBuilder()
                 .setCustomId('close_ticket')
-                .setLabel('Cerrar Ticket')
+                .setLabel('Cerrar solicitud')
                 .setStyle(ButtonStyle.Danger)
                 .setEmoji('🔒'),
         );

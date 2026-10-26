@@ -5,7 +5,7 @@
  * the likely active responder pool when enough per-staff history exists.
  */
 
-export const WAIT_ESTIMATOR_MODEL_VERSION = 'per-staff-capacity-v2';
+export const WAIT_ESTIMATOR_MODEL_VERSION = 'per-staff-capacity-v3';
 
 export interface TicketResponseData {
     createdAt: Date;

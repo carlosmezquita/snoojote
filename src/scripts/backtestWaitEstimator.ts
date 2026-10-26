@@ -1,17 +1,29 @@
 import db from '../database/db.js';
 import { tickets, ticketWaitEstimateSnapshots } from '../database/schema.js';
-import { evaluateWaitEstimates } from '../features/tickets/services/waitTimeEvaluation.js';
+import {
+    evaluateWaitEstimates,
+    observeInitialWait,
+} from '../features/tickets/services/waitTimeEvaluation.js';
 import { computeMedian } from '../features/tickets/services/waitTimeEstimator.js';
 
 const rows = await db.select().from(tickets).all();
 const snapshots = await db.select().from(ticketWaitEstimateSnapshots).all();
-const results = evaluateWaitEstimates(rows, snapshots);
+const asOf = new Date();
+const results = evaluateWaitEstimates(rows, snapshots, asOf);
+const outcomes = new Map<string, number>();
+for (const row of rows) {
+    const outcome = observeInitialWait(row, asOf).outcome;
+    outcomes.set(outcome, (outcomes.get(outcome) ?? 0) + 1);
+}
+console.log(
+    `Initial wait outcomes as of ${asOf.toISOString()}: ${JSON.stringify(Object.fromEntries(outcomes))}`,
+);
 console.log(`Evaluated saved forecasts: ${results.length}`);
 console.log(
     `Skipped tickets without a valid response and an on-time forecast: ${rows.length - results.length}`,
 );
 console.log(
-    'No historical staff presence or unanswered queue is inferred. Results describe answered tickets only.',
+    'Errors describe answered initial waits only, measured from forecast issuance. Pending waits and competing non-response outcomes are reported separately; no historical presence or departure date is inferred.',
 );
 
 for (const version of new Set(results.map((result) => result.modelVersion))) {

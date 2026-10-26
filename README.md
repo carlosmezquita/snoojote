@@ -112,14 +112,30 @@ It never opens `data/database.sqlite`. Tests exercise failure recovery, authoriz
 concurrent rewards/ticket operations, and a synthetic 3,000-member guild. Synthetic results do not
 measure production gateway latency or uptime.
 
-`bun run tickets:backtest-wait` evaluates saved forecasts issued before a ticket's first response,
-grouped by model version. It reports skipped tickets and measures answered tickets only. New
-estimates normalize historical load using recorded unanswered queues; legacy rows without that
-context are excluded from that calculation.
+`bun run tickets:backtest-wait` reports initial-wait outcomes separately from forecast errors,
+grouped by model version. Errors measure the wait remaining from forecast issuance for answered
+initial waits only. Pending tickets are observed up to the export cutoff; requester closures,
+staff closures, deletion without a reply, and observed requester unavailability are competing
+outcomes, not response samples. `per-staff-capacity-v3` corrects response eligibility and counts
+other pending ticket creations in the unanswered queue. It retains the v2 heuristic, which is not
+a validated service-level promise or a calibrated prediction interval.
+
+`bun run tickets:export-wait > wait-observations.csv` exports raw UTC timestamps, correctly scaled
+millisecond durations, outcome provenance, and all saved forecasts, including tickets without a
+forecast. Keep this operational export private. Legacy outcomes use available timestamps only;
+a deleted status or unknown user does not establish when or why someone left. New outcome fields
+are immutable for the initial wait, so reopening or returning cannot relabel a cancellation as a
+successful initial response. Follow-up waits in reopened tickets need separate episode tracking.
+Known legacy closure boundaries are retained before reopening or deletion; earlier lost episodes
+cannot be reconstructed from the current ticket row.
+Gateway member removals mean leave/kick/ban and are recorded at observation time. Events missed
+while the bot is offline are not reconstructed. Apply migration `0012` before starting this version.
 
 ## Operations
 
-- Ticket closure/deletion requires a successful transcript archive. Exports stop at 8 MiB or
+- Ticket closure/deletion requires a successful transcript archive. Archives include embeds
+  (opening form answers and the announced estimate), attachments, and message/author IDs. Older
+  text-only archives cannot recover omitted embeds after channel deletion. Exports stop at 8 MiB or
   10,000 messages; an oversized ticket remains available for manual export. Discord deletion
   failures preserve a retryable record.
 - Voice sessions and verification challenges live in memory. Restarts begin voice accounting anew;

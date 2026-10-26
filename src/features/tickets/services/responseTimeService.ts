@@ -5,7 +5,7 @@ import {
     tickets,
     ticketWaitEstimateSnapshots,
 } from '../../../database/schema.js';
-import { desc, isNotNull, eq, and, isNull, count, gte, inArray } from 'drizzle-orm';
+import { desc, isNotNull, eq, ne, and, or, isNull, count, gte, inArray } from 'drizzle-orm';
 import {
     WAIT_ESTIMATOR_MODEL_VERSION,
     type EstimationResult,
@@ -103,7 +103,16 @@ export class ResponseTimeService {
         db.transaction(
             (tx) => {
                 const ticket = tx.select().from(tickets).where(eq(tickets.id, ticketId)).get();
-                if (!ticket || ticket.status !== 'open' || !isFiniteDate(timestamp)) return;
+                if (
+                    !ticket ||
+                    !['open', 'creating'].includes(ticket.status) ||
+                    ticket.channelId.startsWith('pending:') ||
+                    ticket.userId === staffId ||
+                    !isFiniteDate(timestamp) ||
+                    timestamp < ticket.createdAt ||
+                    ticket.requesterUnavailableAt
+                )
+                    return;
                 if (
                     messageId &&
                     tx
@@ -121,9 +130,16 @@ export class ResponseTimeService {
                     return;
                 let responseTimeMs: number | null = null;
                 if (!ticket.firstResponseAt) {
-                    responseTimeMs = Math.max(timestamp.getTime() - ticket.createdAt.getTime(), 0);
+                    if (!ticket.waitOutcome)
+                        responseTimeMs = timestamp.getTime() - ticket.createdAt.getTime();
                     tx.update(tickets)
-                        .set({ firstResponseAt: timestamp, firstResponseBy: staffId })
+                        .set({
+                            firstResponseAt: timestamp,
+                            firstResponseBy: staffId,
+                            ...(!ticket.waitOutcome
+                                ? { waitOutcome: 'responded' as const, waitEndedAt: timestamp }
+                                : {}),
+                        })
                         .where(eq(tickets.id, ticketId))
                         .run();
                     historicalLoadCache = null;
@@ -275,11 +291,19 @@ export class ResponseTimeService {
      * Counts the number of currently open tickets that have NOT yet
      * received a staff response. This is the unanswered queue (Q).
      */
-    async getUnansweredQueueLength(): Promise<number> {
+    async getUnansweredQueueLength(guildId?: string, excludeTicketId?: number): Promise<number> {
         const result = await db
             .select({ value: count() })
             .from(tickets)
-            .where(and(eq(tickets.status, 'open'), isNull(tickets.firstResponseAt)))
+            .where(
+                and(
+                    inArray(tickets.status, ['open', 'creating']),
+                    isNull(tickets.firstResponseAt),
+                    isNull(tickets.requesterUnavailableAt),
+                    guildId ? eq(tickets.guildId, guildId) : undefined,
+                    excludeTicketId !== undefined ? ne(tickets.id, excludeTicketId) : undefined,
+                ),
+            )
             .get();
 
         return result?.value ?? 0;
@@ -289,11 +313,17 @@ export class ResponseTimeService {
      * Counts the number of currently open tickets (all, regardless of response).
      * Used for recording context data at ticket creation.
      */
-    async getOpenTicketCount(): Promise<number> {
+    async getOpenTicketCount(guildId?: string, excludeTicketId?: number): Promise<number> {
         const result = await db
             .select({ value: count() })
             .from(tickets)
-            .where(eq(tickets.status, 'open'))
+            .where(
+                and(
+                    inArray(tickets.status, ['open', 'creating']),
+                    guildId ? eq(tickets.guildId, guildId) : undefined,
+                    excludeTicketId !== undefined ? ne(tickets.id, excludeTicketId) : undefined,
+                ),
+            )
             .get();
 
         return result?.value ?? 0;
@@ -380,7 +410,7 @@ export class ResponseTimeService {
                 unansweredTicketsAtCreation: r.unansweredTicketsAtCreation,
             }));
 
-        const queueLength = queueLengthOverride ?? (await this.getUnansweredQueueLength());
+        const queueLength = queueLengthOverride ?? (await this.getUnansweredQueueLength(guild.id));
         const staffCapacity = await this.getStaffCapacity(guild, options);
         const staffProfiles = await this.enrichStaffProfiles(
             staffCapacity.staffProfiles,
@@ -430,7 +460,16 @@ export class ResponseTimeService {
         const recentRows = db
             .select(projection)
             .from(tickets)
-            .where(isNotNull(tickets.firstResponseAt))
+            .where(
+                and(
+                    isNotNull(tickets.firstResponseAt),
+                    or(isNull(tickets.waitOutcome), eq(tickets.waitOutcome, 'responded')),
+                    or(
+                        isNull(tickets.firstResponseBy),
+                        ne(tickets.firstResponseBy, tickets.userId),
+                    ),
+                ),
+            )
             .orderBy(desc(tickets.createdAt))
             .limit(20)
             .all();
@@ -440,6 +479,11 @@ export class ResponseTimeService {
             .where(
                 and(
                     isNotNull(tickets.firstResponseAt),
+                    or(isNull(tickets.waitOutcome), eq(tickets.waitOutcome, 'responded')),
+                    or(
+                        isNull(tickets.firstResponseBy),
+                        ne(tickets.firstResponseBy, tickets.userId),
+                    ),
                     gte(tickets.firstResponseAt, new Date(now.getTime() - 60 * 86_400_000)),
                 ),
             )
@@ -450,13 +494,17 @@ export class ResponseTimeService {
         return this.historyCache;
     }
 
-    async recordEstimateSnapshot(ticketId: number, estimate: EstimationResult): Promise<void> {
+    async recordEstimateSnapshot(
+        ticketId: number,
+        estimate: EstimationResult,
+        issuedAt = new Date(),
+    ): Promise<void> {
         await db.insert(ticketWaitEstimateSnapshots).values({
             ticketId,
             modelVersion: estimate.factors.modelVersion,
             estimatedMs: estimate.estimatedMs,
             factorDetails: estimate.factors,
-            createdAt: new Date(),
+            createdAt: issuedAt,
         });
     }
 
@@ -513,11 +561,14 @@ export class ResponseTimeService {
                 responseTimeMs: ticketStaffActivity.responseTimeMs,
             })
             .from(ticketStaffActivity)
+            .innerJoin(tickets, eq(tickets.id, ticketStaffActivity.ticketId))
             .where(
                 and(
                     inArray(ticketStaffActivity.staffId, staffIds),
                     eq(ticketStaffActivity.action, 'message'),
                     isNotNull(ticketStaffActivity.responseTimeMs),
+                    ne(ticketStaffActivity.staffId, tickets.userId),
+                    or(isNull(tickets.waitOutcome), eq(tickets.waitOutcome, 'responded')),
                     gte(ticketStaffActivity.occurredAt, ninetyDaysAgo),
                 ),
             )

@@ -14,6 +14,7 @@
         "format": "prettier . --write --ignore-unknown",
         "format:check": "prettier . --check --ignore-unknown",
         "db:check": "bunx drizzle-kit check",
+        "tickets:export-wait": "bun src/scripts/exportWaitObservations.ts",
         "tickets:backtest-wait": "bun src/scripts/backtestWaitEstimator.ts",
         "check": "bun run typecheck && bun run lint && bun run format:check && bun run db:check && bun test",
         "deploy": "bun src/scripts/deployCommands.ts",
