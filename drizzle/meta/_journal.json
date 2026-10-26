@@ -85,6 +85,13 @@
             "when": 1792942471786,
             "tag": "0011_runtime_invariants",
             "breakpoints": true
+        },
+        {
+            "idx": 12,
+            "version": "6",
+            "when": 1793054540035,
+            "tag": "0012_ticket_wait_outcomes",
+            "breakpoints": true
         }
     ]
 }

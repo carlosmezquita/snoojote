@@ -23,6 +23,20 @@ export const tickets = sqliteTable(
             .notNull(),
         firstResponseAt: integer('first_response_at', { mode: 'timestamp' }),
         firstResponseBy: text('first_response_by'),
+        // The initial wait ends once. Reopening does not turn a cancellation into a response.
+        waitOutcome: text('wait_outcome', {
+            enum: [
+                'responded',
+                'requester_closed',
+                'staff_closed',
+                'closed_unknown',
+                'deleted',
+                'requester_unavailable',
+            ],
+        }),
+        waitEndedAt: integer('wait_ended_at', { mode: 'timestamp' }),
+        // Current observed membership state, independent of the initial wait outcome.
+        requesterUnavailableAt: integer('requester_unavailable_at', { mode: 'timestamp' }),
         closedAt: integer('closed_at', { mode: 'timestamp' }),
         closedBy: text('closed_by'),
         closeReason: text('close_reason'),

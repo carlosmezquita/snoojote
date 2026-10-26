@@ -213,11 +213,12 @@ export const execute = async (interaction: Interaction, client: DiscordBot) => {
 function closeTicketModal() {
     const modal = new ModalBuilder()
         .setCustomId('close_ticket_modal')
-        .setTitle('Cerrar Ticket / Close Ticket');
+        .setTitle('Confirmar cierre de solicitud');
 
     const reasonInput = new TextInputBuilder()
         .setCustomId('close_reason')
-        .setLabel('Motivo / Reason')
+        .setLabel('Motivo del cierre (opcional)')
+        .setPlaceholder('Este formulario cierra el ticket. Para pedir ayuda, escribe en el canal.')
         .setStyle(TextInputStyle.Paragraph)
         .setMaxLength(1024)
         .setRequired(false);
