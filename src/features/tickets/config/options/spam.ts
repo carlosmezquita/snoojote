@@ -41,7 +41,7 @@ export const spamTicket: TicketOptionConfig = {
         .setTitle('Reporte de Spam / Spam Report')
         .addComponents(
             new LabelBuilder()
-                .setLabel('Usuario / User')
+                .setLabel('Sospechoso / Suspect')
                 .setTextInputComponent(
                     new TextInputBuilder()
                         .setCustomId('reported_user')
