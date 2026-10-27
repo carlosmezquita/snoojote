@@ -243,6 +243,14 @@ export class TicketService {
                     files: screenshotFiles,
                 });
             }
+            if (option.id === 'spam' && screenshotFiles.length === 0) {
+                await channel.send({
+                    content:
+                        'Si tienes capturas de pantalla, te agradeceríamos que las compartieras en este canal para ayudarnos a gestionar tu reporte.\n\n' +
+                        'If you have screenshots, we would appreciate it if you could share them in this channel to help us handle your report.',
+                    allowedMentions: { parse: [] },
+                });
+            }
             if (showEstimate)
                 await responseTimeService.recordEstimateSnapshot(
                     reservation.id,
