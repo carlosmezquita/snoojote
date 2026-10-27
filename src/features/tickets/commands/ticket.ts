@@ -8,7 +8,7 @@ import {
 import { type DiscordBot } from '../../../core/client.js';
 import ticketService from '../services/ticketService.js';
 import responseTimeService from '../services/responseTimeService.js';
-import { formatDuration } from '../services/waitTimeEstimator.js';
+import { createWaitEstimateReport } from '../utils/waitEstimateReport.js';
 import { isTicketStaff } from '../utils/ticketStaff.js';
 
 export const data = new SlashCommandBuilder()
@@ -40,8 +40,14 @@ export const data = new SlashCommandBuilder()
     )
     .addSubcommand((subcommand) =>
         subcommand
-            .setName('waitdebug')
-            .setDescription('Muestra factores internos del estimador de espera.'),
+            .setName('wait')
+            .setDescription('Consulta la primera respuesta estimada para un ticket nuevo (admin).')
+            .addBooleanOption((option) =>
+                option
+                    .setName('details')
+                    .setDescription('Incluye presencias y factores del estimador.')
+                    .setRequired(false),
+            ),
     )
     .addSubcommand((subcommand) =>
         subcommand
@@ -69,82 +75,52 @@ export const execute = async (interaction: ChatInputCommandInteraction, client: 
         return;
     }
 
+    const subcommand = interaction.options.getSubcommand();
+    if (subcommand === 'wait' || subcommand === 'waitdebug') {
+        // The interaction carries Discord's current permission snapshot; fail closed if absent.
+        if (!interaction.memberPermissions?.has(PermissionFlagsBits.Administrator)) {
+            await interaction.reply({
+                content: 'Solo administradores pueden consultar datos internos del estimador.',
+                ephemeral: true,
+            });
+            return;
+        }
+        // Redirect commands still registered during a rolling deployment, without a second report.
+        if (subcommand === 'waitdebug') {
+            await interaction.reply({
+                content: 'Este diagnóstico ahora está en `/ticket wait` (opción `details`).',
+                ephemeral: true,
+            });
+            return;
+        }
+        await interaction.deferReply({ ephemeral: true });
+        try {
+            const status = await responseTimeService.getWaitEstimateStatus(interaction.guild!, {
+                forceRefresh: true,
+            });
+            await interaction.editReply({
+                embeds: createWaitEstimateReport(
+                    status,
+                    interaction.options.getBoolean('details') ?? false,
+                ),
+                allowedMentions: { parse: [] },
+            });
+        } catch (error) {
+            client.logger.error('Ticket wait command failed', {
+                guildId: interaction.guildId,
+                error,
+            });
+            await interaction.editReply('No se pudo consultar el estimador.');
+        }
+        return;
+    }
+
     const member = await getGuildMember(interaction);
     if (!member) {
         await interaction.reply({ content: 'No pude verificar tus permisos.', ephemeral: true });
         return;
     }
-
-    const subcommand = interaction.options.getSubcommand();
     const isManager = isTicketStaff(member);
-    const isAdmin = member.permissions.has(PermissionFlagsBits.Administrator);
-
-    if (subcommand === 'waitdebug' && !isAdmin) {
-        await interaction.reply({
-            content: 'Solo administradores pueden consultar datos internos del estimador.',
-            ephemeral: true,
-        });
-        return;
-    }
-
-    if (subcommand === 'waitdebug') {
-        await interaction.deferReply({ ephemeral: true });
-
-        try {
-            const debug = await responseTimeService.getWaitEstimateDebug(interaction.guild!, {
-                forceRefresh: true,
-            });
-            const pool = debug.estimate.factors.responderPool;
-            const staffAvailability =
-                debug.staffProfiles.length > 0
-                    ? debug.staffProfiles
-                          .map((staff) => {
-                              const weight = pool.find(
-                                  (entry) => entry.staffId === staff.staffId,
-                              )?.weight;
-                              return `<@${staff.staffId}>:${staff.status}${
-                                  weight != null ? `:w${weight.toFixed(2)}` : ':not-in-pool'
-                              }`;
-                          })
-                          .join(', ')
-                    : 'none';
-            const missingRoles =
-                debug.missingRoleIds.length > 0 ? debug.missingRoleIds.join(', ') : 'none';
-
-            const debugLines = [
-                `Modelo: ${debug.estimate.factors.modelVersion}`,
-                `Estimado final: ${formatDuration(debug.estimate.estimatedMs)} (${Math.round(
-                    debug.estimate.estimatedMs,
-                )}ms)`,
-                `Capacidad ponderada: ${debug.weightedStaffCapacity.toFixed(2)}`,
-                `Cache staff: ${debug.fromCache ? 'yes' : 'no'} (force refresh)`,
-                `Estados: online ${debug.statusBreakdown.online}, idle ${debug.statusBreakdown.idle}, dnd ${debug.statusBreakdown.dnd}, offline ${debug.statusBreakdown.offline}, unknown ${debug.statusBreakdown.unknown}`,
-                `Roles staff no encontrados: ${missingRoles}`,
-                `Staff detectado: ${staffAvailability}`,
-                `Base global/temporal: ${Math.round(debug.estimate.factors.globalTemporalBaseMs)}ms`,
-                `Base staff activo: ${Math.round(debug.estimate.factors.activeStaffBaseMs)}ms`,
-                `Multiplicador carga: ${debug.estimate.factors.loadMultiplier.toFixed(2)}x`,
-                `Pool ponderado usado por estimador: ${
-                    pool.length > 0
-                        ? pool
-                              .map(
-                                  (entry) =>
-                                      `${entry.staffId}:${entry.status}:w${entry.weight.toFixed(
-                                          2,
-                                      )}:n${entry.sampleCount}`,
-                              )
-                              .join(', ')
-                        : 'none'
-                }`,
-            ];
-
-            await interaction.editReply(truncateDiscordMessage(debugLines.join('\n')));
-        } catch (error) {
-            client.logger.error(`Ticket waitdebug command error: ${error}`);
-            await interaction.editReply('No se pudo consultar el estimador.');
-        }
-        return;
-    }
 
     if (!interaction.channel || !interaction.channel.isTextBased()) {
         await interaction.reply({
@@ -236,10 +212,4 @@ async function getGuildMember(
 ): Promise<GuildMember | null> {
     if (interaction.member instanceof GuildMember) return interaction.member;
     return (await interaction.guild?.members.fetch(interaction.user.id).catch(() => null)) ?? null;
-}
-
-function truncateDiscordMessage(message: string): string {
-    const maxLength = 1900;
-    if (message.length <= maxLength) return message;
-    return `${message.slice(0, maxLength - 20)}\n...truncated`;
 }
