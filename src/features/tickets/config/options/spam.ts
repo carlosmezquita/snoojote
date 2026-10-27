@@ -1,6 +1,7 @@
 import {
-    ActionRowBuilder,
     ButtonStyle,
+    FileUploadBuilder,
+    LabelBuilder,
     ModalBuilder,
     TextInputBuilder,
     TextInputStyle,
@@ -8,6 +9,7 @@ import {
 import { type TicketOptionConfig } from '../TicketConfig.js';
 
 import { config } from '../../../../config.js';
+import { screenshotLimit } from '../../services/ticketAttachments.js';
 
 export const spamTicket: TicketOptionConfig = {
     id: 'spam',
@@ -38,24 +40,36 @@ export const spamTicket: TicketOptionConfig = {
         .setCustomId('ticket_modal_spam')
         .setTitle('Reporte de Spam / Spam Report')
         .addComponents(
-            new ActionRowBuilder<TextInputBuilder>().addComponents(
-                new TextInputBuilder()
-                    .setCustomId('reported_user')
-                    .setLabel('Usuario / User')
-                    .setStyle(TextInputStyle.Short)
-                    .setMaxLength(100)
-                    .setPlaceholder('Nombre de usuario o ID / Username or ID')
-                    .setRequired(true),
-            ),
-            new ActionRowBuilder<TextInputBuilder>().addComponents(
-                new TextInputBuilder()
-                    .setCustomId('reason')
-                    .setLabel('Detalles / Details')
-                    .setStyle(TextInputStyle.Paragraph)
-                    .setMaxLength(1024)
-                    .setMinLength(10)
-                    .setPlaceholder('Pruebas y contexto / Proof and context')
-                    .setRequired(true),
-            ),
+            new LabelBuilder()
+                .setLabel('Usuario / User')
+                .setTextInputComponent(
+                    new TextInputBuilder()
+                        .setCustomId('reported_user')
+                        .setStyle(TextInputStyle.Short)
+                        .setMaxLength(100)
+                        .setPlaceholder('Nombre de usuario o ID / Username or ID')
+                        .setRequired(true),
+                ),
+            new LabelBuilder()
+                .setLabel('Detalles / Details')
+                .setTextInputComponent(
+                    new TextInputBuilder()
+                        .setCustomId('reason')
+                        .setStyle(TextInputStyle.Paragraph)
+                        .setMaxLength(1024)
+                        .setMinLength(10)
+                        .setPlaceholder('Pruebas y contexto / Proof and context')
+                        .setRequired(true),
+                ),
+            new LabelBuilder()
+                .setLabel('Capturas de pantalla / Screenshots')
+                .setDescription('Opcional: hasta 3 imágenes PNG, JPG, WebP o GIF; 8 MiB en total.')
+                .setFileUploadComponent(
+                    new FileUploadBuilder()
+                        .setCustomId('screenshots')
+                        .setRequired(false)
+                        .setMinValues(0)
+                        .setMaxValues(screenshotLimit),
+                ),
         ),
 };

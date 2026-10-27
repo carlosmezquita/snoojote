@@ -1,10 +1,8 @@
 import {
     ActionRowBuilder,
-    ComponentType,
     Events,
     type GuildMember,
     type Interaction,
-    type ModalActionRowComponentBuilder,
     ModalBuilder,
     type TextChannel,
     TextInputBuilder,
@@ -15,6 +13,8 @@ import { config } from '../../../config.js';
 import ticketService from '../services/ticketService.js';
 import { ticketOptions } from '../config/options/index.js';
 import { isTicketStaff } from '../utils/ticketStaff.js';
+import { readTicketModal } from '../services/ticketModal.js';
+import { TicketAttachmentError } from '../services/ticketAttachments.js';
 
 export const name = Events.InteractionCreate;
 export const once = false;
@@ -84,7 +84,11 @@ export const execute = async (interaction: Interaction, client: DiscordBot) => {
                     channelId: interaction.channelId,
                     error,
                 });
-                await interaction.editReply('No se pudo gestionar el ticket.');
+                await interaction.editReply(
+                    error instanceof TicketAttachmentError
+                        ? error.message
+                        : 'No se pudo gestionar el ticket.',
+                );
             }
             return;
         }
@@ -128,7 +132,11 @@ export const execute = async (interaction: Interaction, client: DiscordBot) => {
                     channelId: interaction.channelId,
                     error,
                 });
-                await interaction.editReply('No se pudo cerrar el ticket.');
+                await interaction.editReply(
+                    error instanceof TicketAttachmentError
+                        ? error.message
+                        : 'No se pudo cerrar el ticket.',
+                );
             }
             return;
         }
@@ -140,42 +148,14 @@ export const execute = async (interaction: Interaction, client: DiscordBot) => {
             if (option) {
                 await interaction.deferReply({ ephemeral: true });
 
-                const modalData: { question: string; answer: string }[] = [];
-
-                interaction.fields.fields.forEach((field) => {
-                    if (field.type === ComponentType.TextInput) {
-                        let label = field.customId;
-
-                        const components = option.modal?.components;
-                        if (components) {
-                            for (const row of components) {
-                                const actionRow =
-                                    row as ActionRowBuilder<ModalActionRowComponentBuilder>;
-                                const input = actionRow.components[0];
-
-                                if (
-                                    input &&
-                                    'data' in input &&
-                                    input.data.custom_id === field.customId
-                                ) {
-                                    label = input.data.label || field.customId;
-                                }
-                            }
-                        }
-
-                        modalData.push({
-                            question: label,
-                            answer: field.value,
-                        });
-                    }
-                });
-
                 try {
+                    const submission = readTicketModal(interaction.fields, option.modal);
                     const channel = await ticketService.createTicket(
                         interaction.user,
                         interaction.guild!,
                         option,
-                        modalData,
+                        submission.answers,
+                        submission.attachments,
                     );
                     if (channel) {
                         client.logger.info('Ticket created from interaction', {
@@ -203,7 +183,11 @@ export const execute = async (interaction: Interaction, client: DiscordBot) => {
                         optionId,
                         error,
                     });
-                    await interaction.editReply('Hubo un error al crear el ticket.');
+                    await interaction.editReply(
+                        error instanceof TicketAttachmentError
+                            ? error.message
+                            : 'Hubo un error al crear el ticket.',
+                    );
                 }
             }
         }

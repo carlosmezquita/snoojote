@@ -24,6 +24,19 @@ import { randomUUID } from 'crypto';
 import responseTimeService from './responseTimeService.js';
 import { SerialQueue } from '../../../shared/services/SerialQueue.js';
 import { finishInitialWait, preserveLegacyWaitBoundary } from './ticketWaitLifecycle.js';
+import {
+    archiveAttachmentByteLimit,
+    archiveAttachmentLimit,
+    archiveFilename,
+    downloadAttachment,
+    fetchAttachment,
+    prepareScreenshots,
+    TicketAttachmentError,
+    validateAttachment,
+    withAttachmentTransfer,
+    type AttachmentFetcher,
+    type TicketAttachment,
+} from './ticketAttachments.js';
 
 // Shared across service instances; lifecycle operations must not interleave Discord side effects.
 const lifecycle = new SerialQueue();
@@ -31,6 +44,7 @@ const transcriptByteLimit = 8 * 1024 * 1024;
 const transcriptPageLimit = 100;
 
 type TicketRecord = typeof tickets.$inferSelect;
+type TranscriptAttachment = { messageId: string; attachment: TicketAttachment };
 
 type ResponseTimes = Pick<
     typeof responseTimeService,
@@ -43,13 +57,28 @@ type ResponseTimes = Pick<
 
 export class TicketService {
     private readonly creating = new Set<number>();
-    constructor(private readonly responseTimes: ResponseTimes = responseTimeService) {}
+    constructor(
+        private readonly responseTimes: ResponseTimes = responseTimeService,
+        private readonly attachmentFetcher: AttachmentFetcher = fetchAttachment,
+    ) {}
 
     async createTicket(
         user: User,
         guild: Guild,
         option: TicketOptionConfig,
         modalData: { question: string; answer: string }[],
+        screenshots: readonly TicketAttachment[] = [],
+    ): Promise<TextChannel | null> {
+        const create = () => this.create(user, guild, option, modalData, screenshots);
+        return screenshots.length ? withAttachmentTransfer(create) : create();
+    }
+
+    private async create(
+        user: User,
+        guild: Guild,
+        option: TicketOptionConfig,
+        modalData: { question: string; answer: string }[],
+        screenshots: readonly TicketAttachment[],
     ): Promise<TextChannel | null> {
         // Reserve synchronously in SQLite before the first Discord request.
         const reservation = db.transaction((tx) => {
@@ -80,6 +109,7 @@ export class TicketService {
         this.creating.add(reservation.id);
         let channel: TextChannel | undefined;
         try {
+            const screenshotFiles = await prepareScreenshots(screenshots, this.attachmentFetcher);
             const channelName = `${option.channelPrefix}${user.username.substring(0, 10)}`;
 
             const permissionOverwrites: any[] = [
@@ -104,6 +134,8 @@ export class TicketService {
                         PermissionFlagsBits.ViewChannel,
                         PermissionFlagsBits.SendMessages,
                         PermissionFlagsBits.ManageChannels,
+                        PermissionFlagsBits.AttachFiles,
+                        PermissionFlagsBits.ReadMessageHistory,
                     ],
                 },
             ];
@@ -204,6 +236,13 @@ export class TicketService {
                 embeds: [embed],
                 components: [this.openTicketControls()],
             });
+            if (screenshotFiles.length) {
+                await channel.send({
+                    content: '**Capturas de pantalla / Screenshots**',
+                    allowedMentions: { parse: [] },
+                    files: screenshotFiles,
+                });
+            }
             if (showEstimate)
                 await responseTimeService.recordEstimateSnapshot(
                     reservation.id,
@@ -313,8 +352,16 @@ export class TicketService {
         const ticket = await this.requireTicket(channel);
         if (ticket.status === 'closed') return;
         // A failed or oversized export must leave the ticket open and recoverable.
-        const transcript = await this.generateTranscript(channel);
-        await this.sendTranscriptToLog(channel, ticket, closer, reason, transcript);
+        const attachments = new Map<string, TranscriptAttachment>();
+        const text = await this.buildTranscript(channel, attachments);
+        const transcript = await this.sendTranscriptToLog(
+            channel,
+            ticket,
+            closer,
+            reason,
+            text,
+            attachments,
+        );
         await channel.permissionOverwrites.edit(ticket.userId, {
             ViewChannel: true,
             SendMessages: false,
@@ -424,9 +471,16 @@ export class TicketService {
 
     private async remove(channel: TextChannel, actor: User, reason: string): Promise<void> {
         const ticket = await this.requireTicket(channel);
-        const transcript = await this.generateTranscript(channel);
-
-        await this.sendTranscriptToLog(channel, ticket, actor, reason, transcript);
+        const attachments = new Map<string, TranscriptAttachment>();
+        const text = await this.buildTranscript(channel, attachments);
+        const transcript = await this.sendTranscriptToLog(
+            channel,
+            ticket,
+            actor,
+            reason,
+            text,
+            attachments,
+        );
 
         await channel.send({
             content: `🗑️ Eliminando ticket por ${actor.toString()}. La transcripción se ha archivado.`,
@@ -446,7 +500,15 @@ export class TicketService {
     }
 
     async generateTranscript(channel: TextChannel): Promise<string> {
+        return this.buildTranscript(channel);
+    }
+
+    private async buildTranscript(
+        channel: TextChannel,
+        archiveAttachments?: Map<string, TranscriptAttachment>,
+    ): Promise<string> {
         const lines: string[][] = [];
+        let attachmentBytes = 0;
         const ticket = channel.id ? await this.getTicketByChannel(channel.id) : undefined;
         const metadata = ticket
             ? `Ticket metadata: ${JSON.stringify({
@@ -473,6 +535,32 @@ export class TicketService {
             if (messages.size === 0) break;
             lines.unshift(
                 [...messages.values()].reverse().map((msg) => {
+                    if (archiveAttachments) {
+                        for (const attachment of msg.attachments.values()) {
+                            // Closing posts a transcript back into the ticket. Its original archive
+                            // already exists; recopying it on deletion consumes the evidence budget.
+                            if (
+                                msg.author.id === channel.client.user?.id &&
+                                attachment.name.startsWith('transcript-') &&
+                                attachment.name.endsWith('.txt')
+                            )
+                                continue;
+                            if (archiveAttachments.has(attachment.id)) continue;
+                            validateAttachment(attachment);
+                            attachmentBytes += attachment.size;
+                            archiveAttachments.set(attachment.id, {
+                                messageId: msg.id,
+                                attachment,
+                            });
+                            if (
+                                archiveAttachments.size > archiveAttachmentLimit ||
+                                attachmentBytes > archiveAttachmentByteLimit
+                            )
+                                throw new TicketAttachmentError(
+                                    'El ticket supera el límite de archivo (20 adjuntos o 32 MiB). Exporta las pruebas manualmente; el ticket se conserva.',
+                                );
+                        }
+                    }
                     const attachments =
                         msg.attachments.size > 0
                             ? `\n[Attachments]: ${msg.attachments.map((a) => a.url).join(', ')}`
@@ -641,6 +729,7 @@ export class TicketService {
         actor: User,
         reason: string,
         transcript: string,
+        attachments: ReadonlyMap<string, TranscriptAttachment>,
     ) {
         const logChannel = await channel.client.channels
             .fetch(config.channels.transcripts)
@@ -661,22 +750,76 @@ export class TicketService {
                 'Ticket transcript log channel is unavailable; the ticket was preserved.',
             );
         }
+        if (
+            !('guildId' in logChannel) ||
+            logChannel.guildId !== channel.guild.id ||
+            logChannel.id === channel.id ||
+            !('permissionsFor' in logChannel) ||
+            !logChannel.permissionsFor(channel.guild.id) ||
+            logChannel.permissionsFor(channel.guild.id)!.has(PermissionFlagsBits.ViewChannel)
+        )
+            throw new TicketAttachmentError(
+                'El canal de transcripciones debe ser privado y pertenecer a este servidor. El ticket se conserva.',
+            );
 
-        try {
-            await logChannel.send({
-                content: `📄 Transcript for ${channel.name}\nOwner: <@${ticket.userId}>\nAction by: ${actor.toString()}\nReason: ${reason}`,
-                files: [this.transcriptFile(channel, transcript)],
-            });
-        } catch (error) {
-            logger.error('Failed to send ticket transcript to log channel', {
-                channelId: channel.id,
-                transcriptChannelId: config.channels.transcripts,
-                ticketOwnerId: ticket.userId,
-                actorId: actor.id,
-                error,
-            });
-            throw error;
-        }
+        return withAttachmentTransfer(async () => {
+            try {
+                const manifest: string[] = [];
+                const signal = AbortSignal.timeout(60_000);
+                // Copy one file at a time: bounded memory and no dependence on expiring source URLs.
+                for (const { messageId, attachment } of attachments.values()) {
+                    const data = await downloadAttachment(
+                        attachment,
+                        this.attachmentFetcher,
+                        signal,
+                    );
+                    const archived = await logChannel.send({
+                        content: `📎 Evidence for ticket ${ticket.id} (${channel.id}); source message ${messageId}.`,
+                        allowedMentions: { parse: [] },
+                        files: [new AttachmentBuilder(data, { name: archiveFilename(attachment) })],
+                    });
+                    const copy = archived.attachments.first();
+                    if (!copy)
+                        throw new Error(
+                            'Discord did not return the archived attachment; ticket preserved.',
+                        );
+                    manifest.push(
+                        JSON.stringify({
+                            sourceMessageId: messageId,
+                            sourceAttachmentId: attachment.id,
+                            originalName: attachment.name,
+                            archiveMessageUrl: archived.url,
+                            archiveAttachmentId: copy.id,
+                            archiveFilename: copy.name,
+                        }),
+                    );
+                }
+                if (manifest.length)
+                    transcript +=
+                        '\nArchived attachment files (open the Discord message to retrieve each file):\n' +
+                        manifest.join('\n') +
+                        '\n';
+                if (Buffer.byteLength(transcript, 'utf8') > transcriptByteLimit)
+                    throw new Error(
+                        'Transcript and attachment manifest exceed the 8 MiB export budget; ticket preserved.',
+                    );
+                await logChannel.send({
+                    content: `📄 Transcript for ${channel.name}\nOwner: <@${ticket.userId}>\nAction by: ${actor.toString()}\nReason: ${reason}`,
+                    allowedMentions: { parse: [] },
+                    files: [this.transcriptFile(channel, transcript)],
+                });
+                return transcript;
+            } catch (error) {
+                logger.error('Failed to send ticket transcript to log channel', {
+                    channelId: channel.id,
+                    transcriptChannelId: config.channels.transcripts,
+                    ticketOwnerId: ticket.userId,
+                    actorId: actor.id,
+                    error,
+                });
+                throw error;
+            }
+        });
     }
 }
 

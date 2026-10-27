@@ -9,7 +9,7 @@ activities into one TypeScript application.
 ## Features
 
 - **Support:** private tickets, staff claiming, member access, closure/reopening, transcripts,
-  and response-time estimates with recorded prediction factors.
+  optional screenshots in spam reports, and response-time estimates with recorded prediction factors.
 - **Moderation:** link-spam enforcement and session-bound CAPTCHA verification.
 - **Economy:** balances, transfers, daily quests, capped activity rewards, a role shop, and inventory.
 - **Engagement:** configurable streak check-ins, milestone bonuses, streak freezes, and starboard.
@@ -133,11 +133,21 @@ while the bot is offline are not reconstructed. Apply migration `0012` before st
 
 ## Operations
 
-- Ticket closure/deletion requires a successful transcript archive. Archives include embeds
-  (opening form answers and the announced estimate), attachments, and message/author IDs. Older
+- Spam forms accept up to three optional PNG/JPEG/WebP/GIF screenshots (8 MiB combined). The bot
+  validates image signatures and posts uploads in a separate message after the private opening
+  embed; source modal URLs expire.
+  Reports can still be submitted without images, with further evidence attached in the ticket.
+  At most two file-transfer jobs run at once; excess submissions receive a retry message.
+- Ticket closure/deletion requires a successful transcript archive in a different channel in the
+  same guild that denies `ViewChannel` to `@everyone`. Restrict other role access to staff too.
+  Archives include embeds (opening form answers and the announced estimate), message/author IDs,
+  and actual attachment files copied to archive messages. The transcript maps each original file
+  to its archive message, so retrieval does not depend on an expired CDN link. Older
   text-only archives cannot recover omitted embeds after channel deletion. Exports stop at 8 MiB or
-  10,000 messages; an oversized ticket remains available for manual export. Discord deletion
-  failures preserve a retryable record.
+  10,000 messages, with at most 20 attachments, 8 MiB per file and 32 MiB of files per archive.
+  Oversized tickets or failed file copies remain available for retry/manual export. A failed archive
+  may leave partial copies in the archive channel; the final transcript marks a completed export.
+  Discord deletion failures preserve a retryable record. Discord retention is not an external backup.
 - Voice sessions and verification challenges live in memory. Restarts begin voice accounting anew;
   abandoned verification channels are cleaned up. Voice rewards are split by Madrid calendar date.
 - Streaks use configured channels and meaningful messages of at least ten characters. Daily quest
