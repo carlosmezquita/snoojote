@@ -175,7 +175,13 @@ describe('ticket creation reservations and rollback', () => {
             const f = fixture();
             await f
                 .service(async () => new Response(screenshotBytes))
-                .createTicket(f.user, f.guild, { ...f.option, id }, [], withScreenshot ? [screenshot] : []);
+                .createTicket(
+                    f.user,
+                    f.guild,
+                    { ...f.option, id },
+                    [],
+                    withScreenshot ? [screenshot] : [],
+                );
             const reminders = f.sent.filter((message) =>
                 message.content.includes('te agradeceríamos'),
             );
