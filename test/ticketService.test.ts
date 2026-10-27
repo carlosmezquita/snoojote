@@ -134,7 +134,7 @@ function fixture() {
 }
 
 describe('ticket creation reservations and rollback', () => {
-    test('copies submitted screenshots into the private opening message with form answers', async () => {
+    test('sends screenshots in a separate private message after the opening embed', async () => {
         const f = fixture();
         const channel = await f
             .service(async () => new Response(screenshotBytes))
@@ -146,8 +146,13 @@ describe('ticket creation reservations and rollback', () => {
                 [screenshot],
             );
         expect(channel).not.toBeNull();
-        expect(f.sent[0].files?.[0].attachment).toEqual(screenshotBytes);
+        expect(f.sent).toHaveLength(2);
+        expect(f.sent[0].files).toBeUndefined();
         expect(f.sent[0].embeds?.[0].data.description).toContain('Spam evidence');
+        expect(f.sent[1].files?.[0].attachment).toEqual(screenshotBytes);
+        expect(f.sent[1].embeds).toBeUndefined();
+        expect(f.sent[1].content).toContain('Capturas de pantalla');
+        expect(f.sent[1].allowedMentions).toEqual({ parse: [] });
         expect(
             f.channels[0].permissionOverwrites.find(
                 (overwrite: { id: string }) => overwrite.id === 'bot',
@@ -171,6 +176,8 @@ describe('ticket creation reservations and rollback', () => {
         expect(f.channels).toHaveLength(0);
         expect(f.rows()).toHaveLength(0);
         expect(await f.service().createTicket(f.user, f.guild, f.option, [])).not.toBeNull();
+        expect(f.sent).toHaveLength(1);
+        expect(f.sent[0].files).toBeUndefined();
     });
 
     test('a failed screenshot send rolls back the channel and never records an ETA', async () => {
@@ -180,8 +187,9 @@ describe('ticket creation reservations and rollback', () => {
             snapshots++;
         };
         f.responses.getStaffCapacity = async () => {
-            f.channels[0].send = async () => {
-                throw new Error('Upload rejected');
+            f.channels[0].send = async (message: SentMessage) => {
+                if (message.files?.length) throw new Error('Upload rejected');
+                f.sent.push(message);
             };
             return { activeCount: 1, weightedCapacity: 1 };
         };
@@ -190,6 +198,8 @@ describe('ticket creation reservations and rollback', () => {
                 .service(async () => new Response(screenshotBytes))
                 .createTicket(f.user, f.guild, f.option, [], [screenshot]),
         ).rejects.toThrow('Upload rejected');
+        expect(f.sent).toHaveLength(1);
+        expect(f.sent[0].embeds).toHaveLength(1);
         expect(snapshots).toBe(0);
         expect(f.channels[0].deleted).toBe(true);
         expect(f.rows()).toHaveLength(0);

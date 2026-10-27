@@ -134,7 +134,8 @@ while the bot is offline are not reconstructed. Apply migration `0012` before st
 ## Operations
 
 - Spam forms accept up to three optional PNG/JPEG/WebP/GIF screenshots (8 MiB combined). The bot
-  validates image signatures and copies uploads into the private ticket; source modal URLs expire.
+  validates image signatures and posts uploads in a separate message after the private opening
+  embed; source modal URLs expire.
   Reports can still be submitted without images, with further evidence attached in the ticket.
   At most two file-transfer jobs run at once; excess submissions receive a retry message.
 - Ticket closure/deletion requires a successful transcript archive in a different channel in the

@@ -234,9 +234,15 @@ export class TicketService {
                     parse: option.pingHere || option.pingEveryone ? ['everyone'] : [],
                 },
                 embeds: [embed],
-                files: screenshotFiles,
                 components: [this.openTicketControls()],
             });
+            if (screenshotFiles.length) {
+                await channel.send({
+                    content: '**Capturas de pantalla / Screenshots**',
+                    allowedMentions: { parse: [] },
+                    files: screenshotFiles,
+                });
+            }
             if (showEstimate)
                 await responseTimeService.recordEstimateSnapshot(
                     reservation.id,
