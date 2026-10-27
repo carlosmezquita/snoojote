@@ -69,7 +69,7 @@ describe('ticket form submissions', () => {
         ]);
         expect(readTicketModal(fields, spamTicket.modal)).toEqual({
             answers: [
-                { question: 'Usuario / User', answer: 'spammer' },
+                { question: 'Sospechoso / Suspect', answer: 'spammer' },
                 { question: 'Detalles / Details', answer: 'Unsolicited advertising in DMs' },
             ],
             attachments: [screenshot],
@@ -217,7 +217,7 @@ describe('ticket form submissions', () => {
                 interaction.guild,
                 spamTicket,
                 [
-                    { question: 'Usuario / User', answer: 'spammer' },
+                    { question: 'Sospechoso / Suspect', answer: 'spammer' },
                     { question: 'Detalles / Details', answer: 'Repeated unsolicited adverts' },
                 ],
                 [screenshot],

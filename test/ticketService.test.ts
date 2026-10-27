@@ -166,6 +166,34 @@ describe('ticket creation reservations and rollback', () => {
         expect(f.rows()[0].status).toBe('open');
     });
 
+    test('requests screenshots only for spam reports without images', async () => {
+        for (const [id, withScreenshot] of [
+            ['spam', false],
+            ['spam', true],
+            ['general', false],
+        ] as const) {
+            const f = fixture();
+            await f
+                .service(async () => new Response(screenshotBytes))
+                .createTicket(
+                    f.user,
+                    f.guild,
+                    { ...f.option, id },
+                    [],
+                    withScreenshot ? [screenshot] : [],
+                );
+            const reminders = f.sent.filter((message) =>
+                message.content.includes('te agradeceríamos'),
+            );
+            expect(reminders).toHaveLength(id === 'spam' && !withScreenshot ? 1 : 0);
+            if (reminders.length) {
+                expect(reminders[0].content).toContain('If you have screenshots');
+                expect(reminders[0].allowedMentions).toEqual({ parse: [] });
+                expect(f.sent.indexOf(reminders[0])).toBe(1);
+            }
+        }
+    });
+
     test('download failure releases the reservation without opening an empty ticket', async () => {
         const f = fixture();
         await expect(
