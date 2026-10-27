@@ -133,6 +133,13 @@ while the bot is offline are not reconstructed. Apply migration `0012` before st
 
 ## Operations
 
+- `/ticket wait` is the private, admin-only forecast for a **new** ticket's first staff response.
+  Use `details:true` for presence, sample counts and model factors. It replaces both
+  `/admin ticket-availability` and `/ticket waitdebug`; after updating the bot, run `bun run deploy`
+  to replace the registered subcommands. Old registered commands redirect during the transition.
+  Presence is a proxy, and missing history/roles or incomplete membership are reported explicitly.
+  The displayed queue and staff snapshot are the ones used for that forecast. Running the command
+  does not create a ticket or record a forecast for historical evaluation.
 - Spam forms accept up to three optional PNG/JPEG/WebP/GIF screenshots (8 MiB combined). The bot
   validates image signatures and posts uploads in a separate message after the private opening
   embed; source modal URLs expire.

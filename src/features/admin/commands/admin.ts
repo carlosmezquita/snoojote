@@ -5,12 +5,10 @@ import {
     PermissionsBitField,
     type GuildMember,
     type User,
-    EmbedBuilder,
 } from 'discord.js';
 import { type DiscordBot } from '../../../core/client.js';
 import { postDailyWord } from '../../dailyWord/events/dailyWord.js';
 import economyService from '../../economy/services/economyService.js';
-import responseTimeService from '../../tickets/services/responseTimeService.js';
 
 import { isStaff } from '../../../shared/utils/permissions.js';
 
@@ -19,11 +17,6 @@ export const data = new SlashCommandBuilder()
     .setDescription('Comandos administrativos')
     .addSubcommand((subcommand) =>
         subcommand.setName('force-daily-word').setDescription('Publica la Palabra del Día ahora.'),
-    )
-    .addSubcommand((subcommand) =>
-        subcommand
-            .setName('ticket-availability')
-            .setDescription('Muestra el estado real de disponibilidad para tickets.'),
     )
     .addSubcommand((subcommand) =>
         subcommand
@@ -103,7 +96,10 @@ export const execute = async (interaction: ChatInputCommandInteraction, client: 
     }
 
     if (action === 'ticket-availability') {
-        await handleTicketAvailability(interaction, client);
+        await interaction.reply({
+            content: 'Este diagnóstico ahora está en `/ticket wait` (opción `details`).',
+            ephemeral: true,
+        });
         return;
     }
 
@@ -137,80 +133,6 @@ async function handleAdminPay(interaction: ChatInputCommandInteraction, client: 
         await interaction.editReply({
             content: '❌ Error al procesar el pago.',
         });
-    }
-}
-
-async function handleTicketAvailability(
-    interaction: ChatInputCommandInteraction,
-    client: DiscordBot,
-) {
-    await interaction.deferReply({ ephemeral: true });
-
-    try {
-        const availability = await responseTimeService.getStaffAvailability(interaction.guild!, {
-            forceRefresh: true,
-        });
-        const estimate = await responseTimeService.getEstimatedWaitTime(interaction.guild!);
-        const statuses = availability.activeByStatus;
-        const missingRoles =
-            availability.missingRoleIds.length > 0
-                ? availability.missingRoleIds.map((roleId) => `\`${roleId}\``).join(', ')
-                : 'None';
-        const staffList =
-            availability.staffProfiles.length > 0
-                ? availability.staffProfiles
-                      .map((staff) => `<@${staff.staffId}>: ${staff.status}`)
-                      .join('\n')
-                : 'None';
-
-        const embed = new EmbedBuilder()
-            .setTitle('Ticket Availability Debug')
-            .setColor(0x3498db)
-            .addFields(
-                {
-                    name: 'Active staff used by estimator',
-                    value: String(availability.activeCount),
-                    inline: true,
-                },
-                {
-                    name: 'Total ticket staff found',
-                    value: String(availability.totalStaffCount),
-                    inline: true,
-                },
-                {
-                    name: 'Estimated wait',
-                    value: estimate,
-                    inline: true,
-                },
-                {
-                    name: 'Presence breakdown',
-                    value: [
-                        `Online: ${statuses.online}`,
-                        `Idle: ${statuses.idle}`,
-                        `DND: ${statuses.dnd}`,
-                        `Offline/Invisible: ${statuses.offline}`,
-                        `Unknown: ${statuses.unknown}`,
-                    ].join('\n'),
-                    inline: false,
-                },
-                {
-                    name: 'Staff detected',
-                    value: truncateEmbedField(staffList),
-                    inline: false,
-                },
-                {
-                    name: 'Missing configured staff roles',
-                    value: missingRoles,
-                    inline: false,
-                },
-            )
-            .setFooter({ text: 'This command bypasses the staff availability cache.' })
-            .setTimestamp(new Date(availability.fetchedAt));
-
-        await interaction.editReply({ embeds: [embed] });
-    } catch (error) {
-        client.logger.error('Ticket availability debug failed', { error });
-        await interaction.editReply('❌ Error al comprobar la disponibilidad de tickets.');
     }
 }
 
@@ -257,10 +179,4 @@ async function rejectInvalidEconomyTarget(
     }
 
     return false;
-}
-
-function truncateEmbedField(value: string): string {
-    const maxLength = 1024;
-    if (value.length <= maxLength) return value;
-    return `${value.slice(0, maxLength - 20)}\n...truncated`;
 }

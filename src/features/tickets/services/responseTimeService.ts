@@ -16,7 +16,6 @@ import {
     computePresenceWeight,
     getTimeBlock,
     estimateWaitTime,
-    formatDuration,
 } from './waitTimeEstimator.js';
 import logger from '../../../utils/logger.js';
 import { SingleFlight } from '../../../shared/services/SingleFlight.js';
@@ -36,14 +35,15 @@ interface StaffCacheEntry {
     fromCache: boolean;
 }
 
-interface StaffAvailabilitySnapshot {
-    activeCount: number;
-    totalStaffCount: number;
-    activeByStatus: Record<StaffStatus, number>;
+export interface WaitEstimateStatus {
+    estimate: EstimationResult;
+    queueLength: number;
+    statusBreakdown: Record<StaffStatus, number>;
     staffProfiles: StaffResponseProfile[];
     missingRoleIds: string[];
-    fetchedAt: number;
+    staffFetchedAt: number;
     fromCache: boolean;
+    membershipReady: boolean;
 }
 
 interface EnrichedStaffProfileCacheEntry {
@@ -177,22 +177,6 @@ export class ResponseTimeService {
 
     async getWeightedStaffCapacity(guild: Guild): Promise<number> {
         return (await this.getStaffCapacity(guild)).weightedCapacity;
-    }
-
-    async getStaffAvailability(
-        guild: Guild,
-        options: { forceRefresh?: boolean } = {},
-    ): Promise<StaffAvailabilitySnapshot> {
-        const capacity = await this.getStaffCapacity(guild, options);
-        return {
-            activeCount: capacity.activeCount,
-            totalStaffCount: capacity.staffProfiles.length,
-            activeByStatus: capacity.statusBreakdown,
-            staffProfiles: capacity.staffProfiles,
-            missingRoleIds: capacity.missingRoleIds,
-            fetchedAt: capacity.fetchedAt,
-            fromCache: capacity.fromCache,
-        };
     }
 
     /**
@@ -333,17 +317,19 @@ export class ResponseTimeService {
      * Calculates the estimated wait time for a new ticket using the per-staff,
      * capacity-weighted model.
      */
-    async getEstimatedWaitTime(
-        guild: Guild,
-        options: { forceRefresh?: boolean } = {},
-    ): Promise<string> {
-        return formatDuration((await this.createEstimate(guild, undefined, options)).estimatedMs);
-    }
-
     async createEstimate(
         guild: Guild,
         queueLengthOverride?: number,
         options: { forceRefresh?: boolean } = {},
+    ): Promise<EstimationResult> {
+        const staffCapacity = await this.getStaffCapacity(guild, options);
+        return this.estimateWithCapacity(guild, staffCapacity, queueLengthOverride);
+    }
+
+    private async estimateWithCapacity(
+        guild: Guild,
+        staffCapacity: StaffCacheEntry,
+        queueLengthOverride?: number,
     ): Promise<EstimationResult> {
         const now = new Date();
 
@@ -411,7 +397,6 @@ export class ResponseTimeService {
             }));
 
         const queueLength = queueLengthOverride ?? (await this.getUnansweredQueueLength(guild.id));
-        const staffCapacity = await this.getStaffCapacity(guild, options);
         const staffProfiles = await this.enrichStaffProfiles(
             staffCapacity.staffProfiles,
             now,
@@ -508,25 +493,21 @@ export class ResponseTimeService {
         });
     }
 
-    async getWaitEstimateDebug(
+    async getWaitEstimateStatus(
         guild: Guild,
         options: { forceRefresh?: boolean } = {},
-    ): Promise<{
-        estimate: EstimationResult;
-        statusBreakdown: Record<StaffStatus, number>;
-        staffProfiles: StaffResponseProfile[];
-        missingRoleIds: string[];
-        weightedStaffCapacity: number;
-        fromCache: boolean;
-    }> {
+    ): Promise<WaitEstimateStatus> {
         const staffCapacity = await this.getStaffCapacity(guild, options);
+        const queueLength = await this.getUnansweredQueueLength(guild.id);
         return {
-            estimate: await this.createEstimate(guild),
+            estimate: await this.estimateWithCapacity(guild, staffCapacity, queueLength),
+            queueLength,
             statusBreakdown: staffCapacity.statusBreakdown,
             staffProfiles: staffCapacity.staffProfiles,
             missingRoleIds: staffCapacity.missingRoleIds,
-            weightedStaffCapacity: staffCapacity.weightedCapacity,
+            staffFetchedAt: staffCapacity.fetchedAt,
             fromCache: staffCapacity.fromCache,
+            membershipReady: this.loadedGuilds.has(guild.id),
         };
     }
 

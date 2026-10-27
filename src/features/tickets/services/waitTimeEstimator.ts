@@ -65,6 +65,7 @@ export interface EstimationInput {
 
 export interface EstimationFactors {
     modelVersion: string;
+    sampleCounts: { recent: number; temporal: number; global: number };
     globalTemporalBaseMs: number;
     recentMedianMs: number | null;
     temporalMedianMs: number | null;
@@ -262,6 +263,11 @@ export function estimateWaitTime(input: EstimationInput): EstimationResult {
         estimatedMs,
         factors: {
             modelVersion: WAIT_ESTIMATOR_MODEL_VERSION,
+            sampleCounts: {
+                recent: recentTimes.length,
+                temporal: temporalTimes.length,
+                global: allTimes.length,
+            },
             globalTemporalBaseMs,
             recentMedianMs,
             temporalMedianMs,
