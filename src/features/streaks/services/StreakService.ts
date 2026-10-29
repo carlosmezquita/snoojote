@@ -6,7 +6,8 @@ import { config } from '../../../config.js';
 import { type DiscordBot } from '../../../core/client.js';
 import {
     getNewMilestones,
-    getSpainDateKey,
+    getStreakDateKey,
+    getLastStreakDateKey,
     isConsecutiveDay,
     isWithinGracePeriod,
     MILESTONE_BONUSES,
@@ -41,12 +42,13 @@ export class StreakService {
     }
 
     recordCheckIn(userId: string, now = new Date()) {
-        const todayKey = getSpainDateKey(now);
+        const todayKey = getStreakDateKey(now);
         return db.transaction(
             (tx) => {
                 const previous = tx.select().from(streaks).where(eq(streaks.userId, userId)).get();
+                const previousDay = previous ? getLastStreakDateKey(previous) : null;
                 if (
-                    previous?.lastStreakDate === todayKey ||
+                    previousDay === todayKey ||
                     (previous?.lastStreakAt && previous.lastStreakAt > now)
                 )
                     return null;
@@ -55,7 +57,7 @@ export class StreakService {
                 let streak = 1;
                 if (previous) {
                     if (
-                        isConsecutiveDay(previous.lastStreakDate, todayKey) ||
+                        isConsecutiveDay(previousDay, todayKey) ||
                         isWithinGracePeriod(previous.lastStreakAt, now)
                     ) {
                         streak = previous.streak + 1;

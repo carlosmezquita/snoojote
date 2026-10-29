@@ -155,6 +155,25 @@ describe('economy transactions', () => {
 });
 
 describe('atomic streak check-ins', () => {
+    test('check-ins cross 14:00, not midnight, including pre-change stored dates', async () => {
+        const id = user();
+        const service = new StreakService();
+        // A midnight-based row from before deployment belongs to the previous streak day.
+        db.insert(streaks)
+            .values({
+                userId: id,
+                streak: 2,
+                lastStreakDate: '2026-10-29',
+                lastStreakAt: new Date('2026-10-29T09:00:00Z'),
+            })
+            .run();
+        expect(service.recordCheckIn(id, new Date('2026-10-29T12:59:59Z'))).toBeNull();
+        expect(service.recordCheckIn(id, new Date('2026-10-29T13:00:00Z'))?.streak).toBe(3);
+        expect(service.recordCheckIn(id, new Date('2026-10-30T00:00:00Z'))).toBeNull();
+        expect(service.recordCheckIn(id, new Date('2026-10-30T12:59:59Z'))).toBeNull();
+        expect(service.recordCheckIn(id, new Date('2026-10-30T13:00:00Z'))?.streak).toBe(4);
+    });
+
     const milestone = Object.keys(MILESTONE_BONUSES)
         .map(Number)
         .filter((day) => day > 1)

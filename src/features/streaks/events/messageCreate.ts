@@ -11,8 +11,8 @@ export const execute = async (message: Message, client: DiscordBot) => {
     if (!message.guild) return;
 
     if (
-        config.streaks.channelIds.includes(message.channelId) &&
-        message.content.trim().length >= 10
+        message.channelId === config.channels.main &&
+        message.content.toLowerCase().includes('spaincraft')
     ) {
         await streakService.handleStreak(message, client);
     }
