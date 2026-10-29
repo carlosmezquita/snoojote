@@ -12,7 +12,7 @@ activities into one TypeScript application.
   optional screenshots in spam reports, and response-time estimates with recorded prediction factors.
 - **Moderation:** link-spam enforcement and session-bound CAPTCHA verification.
 - **Economy:** balances, transfers, daily quests, capped activity rewards, a role shop, and inventory.
-- **Engagement:** configurable streak check-ins, milestone bonuses, streak freezes, and starboard.
+- **Engagement:** streak check-ins containing `spaincraft` (case-insensitive) in the main channel, with each streak day starting at 14:00 Europe/Madrid, milestone bonuses, streak freezes, and starboard.
 - **Scheduled content:** daily community questions and dictionary word-of-the-day posts.
 - **Optional AI chat:** reply-chain context through Groq, with request deadlines, concurrency
   limits, per-user cooldowns, and bounded context.
