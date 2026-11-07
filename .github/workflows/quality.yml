@@ -25,5 +25,9 @@ jobs:
               with:
                   bun-version-file: package.json
             - run: bun install --frozen-lockfile
+            - name: Check deployment scripts
+              run: |
+                  for script in ops/*.sh; do bash -n "$script"; done
+                  bash ops/deploy.test.sh
             - run: bun run check
             - run: bun run audit

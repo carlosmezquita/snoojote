@@ -6,6 +6,9 @@ Community operations bot built for the r/Spain Discord community of over 3,000 m
 Snoojote brings support tickets, moderation, participation rewards, and scheduled community
 activities into one TypeScript application.
 
+Production deploys automatically from `main` after quality checks pass. See
+[VPS deployment](docs/deployment.md) for setup, recovery, and database upgrades.
+
 ## Features
 
 - **Support:** private tickets, staff claiming, member access, closure/reopening, transcripts,
