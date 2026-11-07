@@ -1,0 +1,33 @@
+[Unit]
+Description=Snoojote Discord Bot
+Wants=network-online.target
+After=network-online.target
+
+[Service]
+Type=simple
+User=snoojote
+Group=snoojote
+WorkingDirectory=/opt/snoojote
+ExecStart=/usr/local/lib/snoojote/bun src/index.ts
+Restart=always
+RestartSec=5
+TimeoutStopSec=15
+UMask=0077
+Environment=PATH=/var/lib/snoojote/.bun/bin:/usr/local/bin:/usr/bin:/bin
+NoNewPrivileges=true
+ProtectSystem=strict
+ProtectHome=true
+ReadWritePaths=/opt/snoojote/data /opt/snoojote/logs
+PrivateTmp=true
+PrivateDevices=true
+ProtectKernelTunables=true
+ProtectKernelModules=true
+ProtectControlGroups=true
+RestrictSUIDSGID=true
+RestrictNamespaces=true
+CapabilityBoundingSet=
+AmbientCapabilities=
+RestrictAddressFamilies=AF_UNIX AF_INET AF_INET6
+
+[Install]
+WantedBy=multi-user.target

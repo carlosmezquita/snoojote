@@ -1,0 +1,3 @@
+# Only the SSH deployment process can elevate these exact service operations.
+# The running bot also has NoNewPrivileges=true, preventing sudo entirely.
+snoojote ALL=(root) NOPASSWD: /usr/bin/systemctl start snoojote, /usr/bin/systemctl stop snoojote, /usr/bin/systemctl is-active --quiet snoojote

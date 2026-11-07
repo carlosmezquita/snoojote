@@ -19,7 +19,7 @@
         "check": "bun run typecheck && bun run lint && bun run format:check && bun run db:check && bun test",
         "deploy": "bun src/scripts/deployCommands.ts",
         "test": "bun test",
-        "audit": "bun audit --audit-level=high",
+        "audit": "bun audit --audit-level=moderate",
         "bench:runtime": "bun src/scripts/benchmarkRuntime.ts"
     },
     "keywords": [],
@@ -35,7 +35,7 @@
         "discord.js": "^14.27.0",
         "dotenv": "^16.6.1",
         "drizzle-orm": "^0.45.4",
-        "glob": "^13.0.6",
+        "glob": "^14.0.2",
         "node-cron": "^3.0.3",
         "winston": "^3.19.0",
         "zod": "^4.6.7"
@@ -62,6 +62,7 @@
     "overrides": {
         "brace-expansion": "5.0.12",
         "esbuild": "0.28.1",
+        "minimatch": "11.0.5",
         "undici": "6.29.1",
         "uuid": "11.1.1",
         "ws": "8.21.0"

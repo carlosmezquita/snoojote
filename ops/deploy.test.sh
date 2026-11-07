@@ -9,7 +9,7 @@ mkdir -p "$fixture/bin" "$fixture/app" "$fixture/home"
 export PATH="$fixture/bin:$PATH" HOME="$fixture/home" FIXTURE="$fixture"
 export OLD_SHA=1111111111111111111111111111111111111111
 export NEW_SHA=2222222222222222222222222222222222222222
-sed "s|cd /home/ubuntu/new-snoojote|cd $fixture/app|" "$source_dir/deploy.sh" > "$fixture/deploy.sh"
+sed "s|cd /opt/snoojote|cd $fixture/app|" "$source_dir/deploy.sh" > "$fixture/deploy.sh"
 cat > "$fixture/bin/mock" <<'MOCK'
 #!/usr/bin/env bash
 set -eu
@@ -36,7 +36,11 @@ case "$name" in
     bun)
         if [[ ${SCENARIO:-} == install && "$1" == install && $(cat "$FIXTURE/revision") == "$NEW_SHA" ]]; then exit 1; fi
         if [[ ${SCENARIO:-} == commands && "$1" == run ]]; then exit 1; fi ;;
-    sqlite3) : ;;
+    sqlite3)
+        backup=${2#.backup }
+        backup=${backup#\'}
+        backup=${backup%\'}
+        : > "$backup" ;;
     sleep) : ;;
 esac
 MOCK
@@ -67,3 +71,17 @@ for scenario in success dirty schema install startup commands; do
     [[ $(cat "$fixture/service") == running ]]
     echo "PASS: $scenario"
 done
+[[ -z "$(find "$HOME/snoojote-backups" -type f ! -perm 600 -print)" ]]
+echo 'PASS: database backups are owner-only'
+
+# Invalid SSH input must fail before fetching or evaluating any repository code.
+sed "s|cd /opt/snoojote|cd $fixture/app|" "$source_dir/deploy-gateway.sh" > "$fixture/gateway.sh"
+for input in '' main "$NEW_SHA;id" "$NEW_SHA extra"; do
+    : > "$fixture/calls"
+    result=0
+    SSH_ORIGINAL_COMMAND="$input" bash "$fixture/gateway.sh" > "$fixture/output" 2>&1 || result=$?
+    [[ "$result" != 0 ]]
+    grep -q 'Expected a commit SHA' "$fixture/output"
+    ! grep -q '^git ' "$fixture/calls"
+done
+echo 'PASS: SSH gateway rejects branch names and shell injection'

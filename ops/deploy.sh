@@ -1,8 +1,9 @@
 #!/usr/bin/env bash
 # Invoked by deploy-gateway.sh, with its server-side lock held.
 set -Eeuo pipefail
+umask 077
 export PATH="$HOME/.bun/bin:$PATH"
-cd /home/ubuntu/new-snoojote
+cd /opt/snoojote
 sha=${1:?Expected a commit SHA}
 [[ "$sha" =~ ^[0-9a-f]{40}$ ]]
 previous=$(git rev-parse HEAD)
