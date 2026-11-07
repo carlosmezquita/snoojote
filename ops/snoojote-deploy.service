@@ -1,0 +1,14 @@
+[Unit]
+Description=Check and deploy Snoojote main
+Wants=network-online.target
+After=network-online.target
+
+[Service]
+Type=oneshot
+User=ubuntu
+WorkingDirectory=/home/ubuntu/new-snoojote
+ExecStart=/home/ubuntu/.local/bin/snoojote-auto-deploy
+Nice=10
+CPUWeight=20
+IOWeight=20
+TimeoutStartSec=30min

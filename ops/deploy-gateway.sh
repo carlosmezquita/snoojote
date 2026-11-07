@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-# Installed outside the checkout; used as the deployment key's forced SSH command.
+# Installed outside the checkout; invoked after the timer's isolated quality gate.
 set -Eeuo pipefail
 export PATH="$HOME/.bun/bin:$PATH"
 cd /home/ubuntu/new-snoojote
@@ -13,6 +13,7 @@ if [[ "$sha" != "$(git rev-parse origin/main)" ]]; then
     echo 'Skipped: main has moved since this deployment was queued.'
     exit 0
 fi
+if [[ "$sha" == "$(git rev-parse HEAD)" ]]; then exit 0; fi
 script=$(mktemp)
 trap 'rm -f "$script"' EXIT
 git show "$sha:ops/deploy.sh" > "$script"

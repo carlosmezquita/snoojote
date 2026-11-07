@@ -1,0 +1,10 @@
+[Unit]
+Description=Check Snoojote main every two minutes
+
+[Timer]
+OnBootSec=2min
+OnUnitInactiveSec=2min
+Unit=snoojote-deploy.service
+
+[Install]
+WantedBy=timers.target
