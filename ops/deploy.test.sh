@@ -76,7 +76,7 @@ echo 'PASS: database backups are owner-only'
 
 # Invalid SSH input must fail before fetching or evaluating any repository code.
 sed "s|cd /opt/snoojote|cd $fixture/app|" "$source_dir/deploy-gateway.sh" > "$fixture/gateway.sh"
-for input in '' main "$NEW_SHA;id" "$NEW_SHA extra"; do
+for input in '' main "$NEW_SHA;id" "$NEW_SHA extra" 'security-check;id' 'security-check extra'; do
     : > "$fixture/calls"
     result=0
     SSH_ORIGINAL_COMMAND="$input" bash "$fixture/gateway.sh" > "$fixture/output" 2>&1 || result=$?

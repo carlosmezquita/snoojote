@@ -44,8 +44,9 @@ secret. Its root-owned `/etc/ssh/authorized_keys/snoojote` entry uses:
 restrict,command="/usr/local/lib/snoojote/deploy-gateway" ssh-ed25519 PUBLIC_KEY snoojote-production-actions
 ```
 
-The forced command accepts only a full SHA matching current `origin/main`, then
-runs that commit's `ops/deploy.sh`. It cannot open an interactive shell or forward
+The forced command accepts a full SHA matching current `origin/main` to run that
+commit's `ops/deploy.sh`, or the exact `security-check` command to run the root-owned,
+unprivileged monitoring script. It cannot open an interactive shell or forward
 ports. The SSH daemon independently forces the same gateway for this account.
 The dedicated account is not in `sudo`, `lxd`, or other administrative groups.
 Its sudoers rule permits only the exact bot start, stop, and status commands.
@@ -116,3 +117,6 @@ sudoers with `visudo -cf` and SSH configuration with `sshd -t` before reloading.
 Do not grant the deployment account permission to edit these files or reload
 systemd definitions. Keep runtime upgrades and infrastructure changes separate
 from routine application deployments.
+
+See [security maintenance](security-maintenance.md) for automated checks,
+dependency updates, alerts, and the manual reboot policy.

@@ -1,0 +1,82 @@
+name: Security monitoring
+
+on:
+    schedule:
+        - cron: '17 7 * * *'
+    workflow_dispatch:
+
+permissions:
+    contents: read
+
+concurrency:
+    group: security-monitoring
+    cancel-in-progress: false
+
+jobs:
+    dependencies:
+        runs-on: ubuntu-latest
+        timeout-minutes: 10
+        steps:
+            - uses: actions/checkout@d23441a48e516b6c34aea4fa41551a30e30af803 # v6
+              with:
+                  persist-credentials: false
+            - uses: oven-sh/setup-bun@0c5077e51419868618aeaa5fe8019c62421857d6 # v2
+              with:
+                  bun-version-file: package.json
+            - run: bun install --frozen-lockfile --ignore-scripts
+            - run: bun run audit
+    vps:
+        if: github.ref == 'refs/heads/main'
+        runs-on: ubuntu-latest
+        timeout-minutes: 5
+        environment: production
+        steps:
+            - name: Check VPS without restarting services
+              env:
+                  SSH_KEY: ${{ secrets.VPS_DEPLOY_KEY }}
+                  KNOWN_HOSTS: ${{ secrets.VPS_KNOWN_HOSTS }}
+                  VPS_HOST: ${{ vars.VPS_HOST }}
+              run: |
+                  set -euo pipefail
+                  umask 077
+                  install -m 700 -d ~/.ssh
+                  trap 'rm -f ~/.ssh/security_key' EXIT
+                  test -n "$SSH_KEY" && test -n "$KNOWN_HOSTS" && test -n "$VPS_HOST"
+                  printf '%s\n' "$SSH_KEY" | tr -d '\r' > ~/.ssh/security_key
+                  printf '%s\n' "$KNOWN_HOSTS" | tr -d '\r' > ~/.ssh/known_hosts
+                  ssh -i ~/.ssh/security_key -o IdentitiesOnly=yes \
+                    -o BatchMode=yes -o StrictHostKeyChecking=yes \
+                    -o ConnectTimeout=15 -o ServerAliveInterval=15 \
+                    -o ServerAliveCountMax=4 "snoojote@$VPS_HOST" security-check
+    alerts:
+        if: always() && github.ref == 'refs/heads/main'
+        needs: [dependencies, vps]
+        runs-on: ubuntu-latest
+        timeout-minutes: 5
+        permissions:
+            issues: write
+        steps:
+            - name: Open or resolve assigned security alerts
+              env:
+                  GH_TOKEN: ${{ github.token }}
+                  GH_REPO: ${{ github.repository }}
+                  DEPENDENCIES_RESULT: ${{ needs.dependencies.result }}
+                  VPS_RESULT: ${{ needs.vps.result }}
+                  RUN_URL: ${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}
+              run: |
+                  set -euo pipefail
+                  for component in dependencies vps; do
+                    if [[ "$component" == dependencies ]]; then result=$DEPENDENCIES_RESULT; else result=$VPS_RESULT; fi
+                    title="Security monitoring: $component needs attention"
+                    number=$(gh issue list --state open --search "\"$title\" in:title author:app/github-actions" --json number --jq '.[0].number // empty')
+                    if [[ "$result" != success ]]; then
+                      body="The $component security check reported $result. Review the [workflow run]($RUN_URL). Checks do not restart the bot or reboot the VPS."
+                      if [[ -z "$number" ]]; then
+                        gh issue create --title "$title" --assignee carlosmezquita --body "$body"
+                      else
+                        gh issue edit "$number" --body "$body"
+                      fi
+                    elif [[ -n "$number" ]]; then
+                      gh issue close "$number" --comment "Checks passed in $RUN_URL."
+                    fi
+                  done

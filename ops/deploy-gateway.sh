@@ -3,6 +3,9 @@
 set -Eeuo pipefail
 umask 077
 export PATH="$HOME/.bun/bin:$PATH"
+if [[ "${SSH_ORIGINAL_COMMAND:-}" == security-check ]]; then
+    exec /usr/local/lib/snoojote/security-check
+fi
 cd /opt/snoojote
 exec 9>.git/snoojote-deploy.lock
 flock -w 600 9
