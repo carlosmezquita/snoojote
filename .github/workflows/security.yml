@@ -30,8 +30,11 @@ jobs:
         runs-on: ubuntu-latest
         timeout-minutes: 5
         environment: production
+        outputs:
+            findings: ${{ steps.check.outputs.findings }}
         steps:
             - name: Check VPS without restarting services
+              id: check
               env:
                   SSH_KEY: ${{ secrets.VPS_DEPLOY_KEY }}
                   KNOWN_HOSTS: ${{ secrets.VPS_KNOWN_HOSTS }}
@@ -44,39 +47,63 @@ jobs:
                   test -n "$SSH_KEY" && test -n "$KNOWN_HOSTS" && test -n "$VPS_HOST"
                   printf '%s\n' "$SSH_KEY" | tr -d '\r' > ~/.ssh/security_key
                   printf '%s\n' "$KNOWN_HOSTS" | tr -d '\r' > ~/.ssh/known_hosts
-                  ssh -i ~/.ssh/security_key -o IdentitiesOnly=yes \
+                  status=0
+                  output=$(ssh -i ~/.ssh/security_key -o IdentitiesOnly=yes \
                     -o BatchMode=yes -o StrictHostKeyChecking=yes \
                     -o ConnectTimeout=15 -o ServerAliveInterval=15 \
-                    -o ServerAliveCountMax=4 "snoojote@$VPS_HOST" security-check
+                    -o ServerAliveCountMax=4 "snoojote@$VPS_HOST" security-check 2>&1) || status=$?
+                  printf '%s\n' "$output"
+                  {
+                    echo 'findings<<SECURITY_FINDINGS'
+                    printf '%s\n' "$output" | grep '^ATTENTION:' || true
+                    echo SECURITY_FINDINGS
+                  } >> "$GITHUB_OUTPUT"
+                  exit "$status"
     alerts:
-        if: always() && github.ref == 'refs/heads/main'
+        if: >-
+            always() && github.ref == 'refs/heads/main' &&
+            (needs.dependencies.result != 'success' || needs.vps.result != 'success')
         needs: [dependencies, vps]
         runs-on: ubuntu-latest
         timeout-minutes: 5
-        permissions:
-            issues: write
+        environment: production
+        permissions: {}
         steps:
-            - name: Open or resolve assigned security alerts
+            - name: Send security alert to Discord
               env:
-                  GH_TOKEN: ${{ github.token }}
-                  GH_REPO: ${{ github.repository }}
+                  DISCORD_WEBHOOK: ${{ secrets.DISCORD_SECURITY_WEBHOOK }}
                   DEPENDENCIES_RESULT: ${{ needs.dependencies.result }}
                   VPS_RESULT: ${{ needs.vps.result }}
+                  VPS_FINDINGS: ${{ needs.vps.outputs.findings }}
                   RUN_URL: ${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}
               run: |
-                  set -euo pipefail
-                  for component in dependencies vps; do
-                    if [[ "$component" == dependencies ]]; then result=$DEPENDENCIES_RESULT; else result=$VPS_RESULT; fi
-                    title="Security monitoring: $component needs attention"
-                    number=$(gh issue list --state open --search "\"$title\" in:title author:app/github-actions" --json number --jq '.[0].number // empty')
-                    if [[ "$result" != success ]]; then
-                      body="The $component security check reported $result. Review the [workflow run]($RUN_URL). Checks do not restart the bot or reboot the VPS."
-                      if [[ -z "$number" ]]; then
-                        gh issue create --title "$title" --assignee carlosmezquita --body "$body"
-                      else
-                        gh issue edit "$number" --body "$body"
-                      fi
-                    elif [[ -n "$number" ]]; then
-                      gh issue close "$number" --comment "Checks passed in $RUN_URL."
-                    fi
-                  done
+                  node --input-type=module <<'JS'
+                  try {
+                    const env = process.env;
+                    const url = new URL(env.DISCORD_WEBHOOK);
+                    if (url.protocol !== 'https:' || url.hostname !== 'discord.com' ||
+                        !/^\/api\/webhooks\/\d+\/[\w-]+$/.test(url.pathname)) {
+                      throw new Error('Invalid webhook configuration');
+                    }
+                    url.searchParams.set('wait', 'true');
+                    const content = [
+                      '**Snoojote security needs attention**',
+                      `Dependencies: ${env.DEPENDENCIES_RESULT}`,
+                      `VPS: ${env.VPS_RESULT}`,
+                      env.VPS_FINDINGS?.slice(0, 1000),
+                      `Details: ${env.RUN_URL}`,
+                      'Reboots remain manual. These checks do not restart the bot.',
+                    ].filter(Boolean).join('\n');
+                    const response = await fetch(url, {
+                      method: 'POST',
+                      headers: { 'Content-Type': 'application/json' },
+                      body: JSON.stringify({ content, allowed_mentions: { parse: [] } }),
+                      signal: AbortSignal.timeout(15000),
+                    });
+                    if (!response.ok) throw new Error('Webhook delivery failed');
+                    console.log('Security alert delivered to the Discord alerts channel.');
+                  } catch {
+                    console.error('Discord alert delivery failed. Check the production webhook secret and Discord availability.');
+                    process.exitCode = 1;
+                  }
+                  JS

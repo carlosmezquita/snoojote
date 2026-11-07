@@ -32,18 +32,24 @@ These checks are a baseline, not a complete vulnerability or intrusion scan.
 
 ## Alerts
 
-Each failing component opens a separate GitHub issue assigned to `carlosmezquita`.
-Subsequent failures update the existing issue, and a successful check closes it.
-The workflow run provides details. Assigned issue and workflow email/push
-delivery follows the account's GitHub notification settings. Security findings
-must be addressed or consciously accepted; do not disable failing checks just
-to hide a pending maintenance requirement.
+Failed checks send an alert to the Discord channel configured as `channels.alerts`
+in the bot's runtime configuration. The message includes component results, VPS
+findings when available, and a link to the workflow run. Passing checks are silent.
+An unresolved finding produces another alert on the next daily check.
 
-A weekly Codex review runs Mondays at 10:00 Canary time in this chat. It reviews
-alerts, update PRs, VPS security posture, and advisory/release information for
-the pinned Bun runtime and dependency overrides. It performs no upgrades,
-merges, reboots, or service restarts. This supplemental review depends on the
-local Codex automation host being available; daily GitHub checks run independently.
+GitHub sends these alerts directly through a channel-scoped Discord webhook,
+even if the bot or VPS is offline. The webhook URL is stored only in the `production`
+environment secret `DISCORD_SECURITY_WEBHOOK`; the bot token stays on the VPS.
+The notification job has no repository write permissions and cannot mention
+everyone or roles. Webhook creation/rotation is performed by an administrator
+using Discord's channel integrations or the bot's channel-webhook permission.
+Treat the webhook URL as a secret: it grants posting access to the alerts channel.
+
+There are no Codex reminders or automatic security-issue assignments. Dependabot
+still opens update PRs. GitHub's own workflow and PR notifications follow the
+account's GitHub notification settings. Pinned Bun runtime and manually pinned
+overrides still require advisory review and supervised updates; the dependency
+audit does not scan the OS or the Bun executable for every possible vulnerability.
 
 ## OS security patches and manual reboots
 
@@ -72,4 +78,4 @@ sudo -H -u snoojote /usr/local/lib/snoojote/security-check
 ```
 
 The check exits nonzero for anything needing attention. After resolving a finding,
-run **Security monitoring** manually to verify it and close the corresponding alert.
+run **Security monitoring** manually to verify it. A successful check sends no message.
