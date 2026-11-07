@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-# Installed outside the checkout; invoked after the timer's isolated quality gate.
+# Installed outside the checkout; used as the deployment key's forced SSH command.
 set -Eeuo pipefail
 export PATH="$HOME/.bun/bin:$PATH"
 cd /home/ubuntu/new-snoojote
