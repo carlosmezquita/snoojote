@@ -71,15 +71,16 @@ and GitHub concurrency prevent overlapping deployments. The deployer refuses
 tracked local edits, non-forward upgrades, missing runtime configuration, and
 unreviewed schema changes before stopping the bot.
 
-It creates a consistent SQLite backup in `/var/lib/snoojote/snoojote-backups`, stops
-the service, checks out the tested commit, installs locked dependencies, restarts,
+Changes limited to `README.md` and Markdown files under `docs/` advance the checkout without restarting or registering commands. For other changes, the deployer extracts the tested revision into a temporary directory and installs its locked dependencies while the current bot serves traffic. Preparation failures leave the running release in place.
+
+After preparation, it creates a consistent SQLite backup in `/var/lib/snoojote/snoojote-backups`, stops the service, checks out the tested commit, swaps dependency directories, restarts,
 and waits up to 60 seconds for a fresh `Bot logged in` message. It then registers
 slash commands. A restart causes brief downtime and clears in-memory sessions.
 The checkout is intentionally detached at the deployed SHA. Deployment never runs
 `git clean`, replaces `.env` or `config/bot.config.json`, or restores the live
 database automatically.
 
-On deployment failure, it attempts to reinstall and restart the previous code.
+On cutover failure, it restores the previous checkout and dependency directory and attempts to restart the service.
 The Actions run stays failed even if recovery succeeds. If command registration
 partially succeeded before failing, rerun `bun run deploy` from the recovered
 checkout to restore the previous command definitions. Check backup disk usage

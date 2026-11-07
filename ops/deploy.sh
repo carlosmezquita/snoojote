@@ -28,6 +28,29 @@ if ! git diff --quiet "$schema_ref" "$sha" -- src/database/schema.ts drizzle; th
     exit 1
 fi
 
+# Compare the entire deployed range. A diff error must never authorize a skip.
+if git diff --quiet "$previous" "$sha" -- . ':(exclude)README.md' ':(exclude,glob)docs/**/*.md'; then
+    git checkout --detach "$sha"
+    echo "Deployed $sha (documentation only; service stayed online)"
+    exit 0
+fi
+
+# Stage on the checkout filesystem so dependency directories can switch by rename.
+# Keep the service working directory and all ignored production state in place.
+stage=$(mktemp -d .git/snoojote-release.XXXXXXXX)
+cleanup() {
+    if [[ -e "$stage/previous-modules" ]]; then
+        echo "Retained rollback dependencies at $stage/previous-modules"
+    else
+        rm -rf -- "$stage"
+    fi
+}
+trap cleanup EXIT
+mkdir "$stage/release"
+git archive "$sha" | tar -x -C "$stage/release"
+(cd "$stage/release" && bun install --frozen-lockfile)
+[[ -d "$stage/release/node_modules" && -d node_modules ]]
+
 wait_ready() {
     local offset=$1
     for ((attempt=0; attempt<60; attempt++)); do
@@ -56,7 +79,13 @@ rollback() {
     set +e
     echo "Deployment failed; restoring $previous"
     sudo -n systemctl stop snoojote
-    git checkout --detach "$previous" && bun install --frozen-lockfile && {
+    restore_modules() {
+        if [[ -d "$stage/previous-modules" ]]; then
+            if [[ -e node_modules ]]; then mv node_modules "$stage/failed-modules" || return 1; fi
+            mv "$stage/previous-modules" node_modules || return 1
+        fi
+    }
+    git checkout --detach "$previous" && restore_modules && {
         offset=$(log_offset)
         sudo -n systemctl start snoojote && wait_ready "$offset"
     }
@@ -77,11 +106,13 @@ trap rollback ERR HUP INT TERM
 sudo -n systemctl stop snoojote
 # Preserve ignored runtime files and untracked server backups; never git clean/reset.
 git checkout --detach "$sha"
-bun install --frozen-lockfile
+mv node_modules "$stage/previous-modules"
+mv "$stage/release/node_modules" node_modules
 offset=$(log_offset)
 sudo -n systemctl start snoojote
 wait_ready "$offset"
 # Register the commands shipped in this revision after confirming Discord login.
 bun run deploy
 trap - ERR HUP INT TERM
+rm -rf -- "$stage/previous-modules"
 echo "Deployed $sha"

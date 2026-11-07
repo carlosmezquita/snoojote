@@ -20,7 +20,9 @@ case "$name" in
         case "$1" in
             rev-parse) cat "$FIXTURE/revision" ;;
             status) [[ ${SCENARIO:-} != dirty ]] || echo ' M src/index.ts' ;;
-            diff) [[ ${SCENARIO:-} != schema ]] ;;
+            archive) tar -cf - --files-from /dev/null ;;
+            diff) if [[ "$*" == *"exclude"* ]]; then [[ "$SCENARIO" == docs ]]; exit; fi
+                [[ ${SCENARIO:-} != schema ]] ;;
             checkout) echo "$3" > "$FIXTURE/revision" ;;
         esac ;;
     sudo)
@@ -34,7 +36,12 @@ case "$name" in
             is-active) [[ $(cat "$FIXTURE/service") == running ]] ;;
         esac ;;
     bun)
-        if [[ ${SCENARIO:-} == install && "$1" == install && $(cat "$FIXTURE/revision") == "$NEW_SHA" ]]; then exit 1; fi
+        if [[ "$1" == install ]]; then
+            [[ "$(cat "$FIXTURE/service")" == running && "$PWD" == */release ]]
+            [[ "$SCENARIO" != install ]] || exit 1
+            mkdir node_modules
+            touch node_modules/prepared
+        fi
         if [[ ${SCENARIO:-} == commands && "$1" == run ]]; then exit 1; fi ;;
     sqlite3)
         backup=${2#.backup }
@@ -47,9 +54,12 @@ MOCK
 chmod +x "$fixture/bin/mock"
 for command in git sudo bun sqlite3 sleep; do ln -s mock "$fixture/bin/$command"; done
 
-for scenario in success dirty schema install startup commands; do
+for scenario in success docs dirty schema install startup commands; do
     export SCENARIO=$scenario
     mkdir -p "$fixture/app/.git" "$fixture/app/config" "$fixture/app/data" "$fixture/app/logs"
+    mkdir -p "$fixture/app/node_modules"
+    rm -f "$fixture/app/node_modules/prepared"
+    touch "$fixture/app/node_modules/original"
     touch "$fixture/app/.env" "$fixture/app/config/bot.config.json" "$fixture/app/data/database.sqlite"
     echo 'Old Bot logged in' > "$fixture/app/logs/combined.log"
     echo "$OLD_SHA" > "$fixture/revision"
@@ -57,13 +67,18 @@ for scenario in success dirty schema install startup commands; do
     : > "$fixture/calls"
     result=0
     bash "$fixture/deploy.sh" "$NEW_SHA" > "$fixture/output" 2>&1 || result=$?
-    if [[ "$scenario" == success ]]; then
+    if [[ "$scenario" == docs ]]; then
+        [[ "$result" == 0 && $(cat "$fixture/revision") == "$NEW_SHA" ]]
+        if grep -Eq 'systemctl stop|bun install|bun run deploy' "$fixture/calls"; then exit 1; fi
+    elif [[ "$scenario" == success ]]; then
+        [[ -f "$fixture/app/node_modules/prepared" && ! -e "$fixture/app/node_modules/original" ]]
         [[ "$result" == 0 && $(cat "$fixture/revision") == "$NEW_SHA" ]]
         grep -q "Deployed $NEW_SHA" "$fixture/output"
     else
         [[ "$result" != 0 && $(cat "$fixture/revision") == "$OLD_SHA" ]]
-        if [[ "$scenario" == dirty || "$scenario" == schema ]]; then
-            ! grep -q 'systemctl stop' "$fixture/calls"
+        [[ -f "$fixture/app/node_modules/original" && ! -e "$fixture/app/node_modules/prepared" ]]
+        if [[ "$scenario" == dirty || "$scenario" == schema || "$scenario" == install ]]; then
+            if grep -q 'systemctl stop' "$fixture/calls"; then exit 1; fi
         else
             grep -q 'Previous code restored' "$fixture/output"
         fi
