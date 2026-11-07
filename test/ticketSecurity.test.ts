@@ -8,6 +8,7 @@ import { execute } from '../src/features/tickets/events/ticketInteraction.js';
 import { ResponseTimeService } from '../src/features/tickets/services/responseTimeService.js';
 import { execute as requesterLeave } from '../src/features/tickets/events/requesterLeave.js';
 import { execute as requesterJoin } from '../src/features/tickets/events/requesterJoin.js';
+import { scanFirstReply } from '../src/features/tickets/events/firstReplyRecovery.js';
 import messageCreate from '../src/features/tickets/events/messageCreate.js';
 
 const ids: number[] = [];
@@ -217,6 +218,48 @@ describe('ticket authorization and response recording', () => {
         expect(db.select().from(tickets).where(eq(tickets.id, row.id)).get()!.firstResponseBy).toBe(
             'staff',
         );
+    });
+    test('history pages recover the earliest staff message across a live reply and retries', async () => {
+        const row = ticket();
+        const earlier = new Date(row.createdAt.getTime() + 5017);
+        const later = new Date(earlier.getTime() + 200);
+        await new ResponseTimeService().recordResponse(row.id, 'live', later, '104');
+        const message = (id: number, author: string, bot = false) => ({
+            id: String(id),
+            createdAt: earlier,
+            author: { id: author, bot },
+            member: { id: author, user: { bot }, permissions: new PermissionsBitField(8n) },
+        });
+        const channel = {
+            id: '0',
+            messages: {
+                fetch: async ({ after }: { after: string }) => {
+                    const page =
+                        after === '0'
+                            ? Array.from({ length: 100 }, (_, i) => message(i + 1, row.userId))
+                            : [
+                                  message(103, 'other'),
+                                  message(102, 'earliest'),
+                                  message(101, 'bot', true),
+                              ];
+                    return new Collection(page.map((m) => [m.id, m]));
+                },
+            },
+        };
+        for (let attempt = 0; attempt < 2; attempt++)
+            await scanFirstReply(channel as never, row, later);
+        const record = db.select().from(tickets).where(eq(tickets.id, row.id)).get()!;
+        expect(record.firstResponseBy).toBe('earliest');
+        expect(record.waitEndedAt?.getTime()).toBe(Math.floor(earlier.getTime() / 1000) * 1000);
+        const activity = db
+            .select()
+            .from(ticketStaffActivity)
+            .where(eq(ticketStaffActivity.ticketId, row.id))
+            .all();
+        expect(activity.map((a) => [a.staffId, a.responseTimeMs])).toEqual([
+            ['live', null],
+            ['earliest', 5017],
+        ]);
     });
     test('closed tickets do not acquire a new first response', async () => {
         const row = ticket();

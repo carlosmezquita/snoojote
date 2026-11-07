@@ -286,6 +286,10 @@ For a legacy bot cutover, preserve its config, storage, transcripts, secrets and
 - Logs rotate by size. Control verbosity and retention with `LOG_LEVEL`, `LOG_MAX_FILE_SIZE_BYTES`,
   and `LOG_MAX_FILES`. Bot/API secrets are redacted from formatted logs.
 
+### First staff replies after downtime
+
+On startup the bot reads open, eligible ticket channels in chronological pages until it finds the first surviving staff reply or reaches the startup cutoff. It uses the Discord message timestamp and excludes bots and the requester. A concurrent live reply can be superseded by an earlier recovered message without duplicating the response-time sample. Closed tickets and competing initial-wait outcomes are preserved. Historical role assignments and deleted messages cannot be reconstructed. A failed channel read is logged with its ticket ID; check View Channel and Read Message History permissions.
+
 ### Forecast telemetry
 
 `bun run tickets:backtest-wait` reports initial-wait outcomes separately from forecast errors,
