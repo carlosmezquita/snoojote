@@ -8,6 +8,9 @@ import { confirmPurchase } from '../src/features/economy/commands/buy.js';
 import shop from '../src/features/economy/services/shopService.js';
 import {
     queueReaction,
+    queueMessage,
+    queueRemovedEmoji,
+    queueMappedMessages,
     flushStarboard,
 } from '../src/features/starboard/services/starboardRefresh.js';
 import { StarboardService } from '../src/features/starboard/services/StarboardService.js';
@@ -219,4 +222,49 @@ test('join observation survives receiver rotation and ambiguous invite changes s
     expect(info).toEqual(['a', 'unknown']);
     expect(welcomes).toBe(2);
     expect(inviteCache.get(guild.id)?.get('b')).toBe(2);
+});
+
+test('startup audit and bulk removals refresh from the authoritative zero count', async () => {
+    const id = 'bulk-source',
+        channelId = 'bulk-channel';
+    sqlite.run(
+        'INSERT INTO starboard_messages(original_message_id,original_channel_id,starboard_message_id) VALUES(?,?,?)',
+        [id, channelId, 'bulk-post'],
+    );
+    const source = {
+        id,
+        channelId,
+        guildId: config.guildId,
+        reactions: { message: {}, cache: new Map([['star', { count: 6 }]]) },
+    };
+    const update = spyOn(StarboardService, 'handleReactionUpdate').mockResolvedValue();
+    const client = {
+        rest: { get: async () => ({ id }) },
+        channels: {
+            fetch: async () => ({
+                guildId: config.guildId,
+                isTextBased: () => true,
+                messages: { fetch: async () => source },
+            }),
+        },
+    };
+    try {
+        queueMappedMessages();
+        queueRemovedEmoji({
+            message: source,
+            emoji: { name: config.starboard.emojis[0] },
+        } as never);
+        queueMessage(source as never);
+        expect(
+            sqlite.query('SELECT revision FROM starboard_refresh WHERE message_id=?').get(id),
+        ).toEqual({ revision: 3 });
+        await flushStarboard(client as never);
+        expect(update).toHaveBeenCalledWith(source as never, []);
+        expect(
+            sqlite.query('SELECT revision FROM starboard_refresh WHERE message_id=?').get(id),
+        ).toBeNull();
+    } finally {
+        update.mockRestore();
+        sqlite.run('DELETE FROM starboard_messages WHERE original_message_id=?', [id]);
+    }
 });

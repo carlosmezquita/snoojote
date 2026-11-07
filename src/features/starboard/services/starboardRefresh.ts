@@ -1,5 +1,9 @@
 import {
     Events,
+    Routes,
+    type APIMessage,
+    type Message,
+    type PartialMessage,
     type Client,
     type MessageReaction,
     type PartialMessageReaction,
@@ -22,6 +26,11 @@ export function queueReaction(
         !config.starboard.emojis.includes(reaction.emoji.name ?? '')
     )
         return;
+    queueMessage(source);
+}
+
+export function queueMessage(source: Message | PartialMessage) {
+    if (source.guildId !== config.guildId || source.channelId === config.channels.starboard) return;
     sqlite.run(
         'INSERT INTO starboard_refresh(message_id,channel_id,revision,due) VALUES(?,?,1,?) ON CONFLICT(message_id) DO UPDATE SET revision=revision+1,due=excluded.due',
         [source.id, source.channelId, Date.now()],
@@ -30,8 +39,19 @@ export function queueReaction(
 export function listenForReactions(client: Client) {
     client.on(Events.MessageReactionAdd, queueReaction);
     client.on(Events.MessageReactionRemove, queueReaction);
+    client.on(Events.MessageReactionRemoveAll, queueMessage);
+    client.on(Events.MessageReactionRemoveEmoji, queueRemovedEmoji);
+}
+export function queueRemovedEmoji(reaction: MessageReaction | PartialMessageReaction) {
+    if (config.starboard.emojis.includes(reaction.emoji.name ?? '')) queueMessage(reaction.message);
+}
+export function queueMappedMessages() {
+    sqlite.run(
+        'INSERT INTO starboard_refresh(message_id,channel_id,revision,due) SELECT original_message_id,original_channel_id,1,0 FROM starboard_messages WHERE true ON CONFLICT(message_id) DO NOTHING',
+    );
 }
 export function startStarboardRefresh(client: Client) {
+    queueMappedMessages();
     let busy = false;
     const tick = async () => {
         if (busy || !client.isReady()) return;
@@ -55,6 +75,7 @@ export async function flushStarboard(client: Client) {
         )
         .all(Date.now());
     for (const row of rows) {
+        let readingSource = true;
         try {
             const channel = await client.channels.fetch(row.channel_id);
             if (
@@ -68,7 +89,19 @@ export async function flushStarboard(client: Client) {
                     force: true,
                     cache: false,
                 });
-                await StarboardService.handleReactionUpdate(msg);
+                // A cache:false fetch can inherit the old ReactionManager when
+                // Discord omits reactions after the last removal. Check the raw
+                // response in that case instead of publishing its cached count.
+                const counts =
+                    msg.reactions && msg.reactions.message !== msg
+                        ? ((
+                              (await client.rest.get(
+                                  Routes.channelMessage(row.channel_id, row.message_id),
+                              )) as APIMessage
+                          ).reactions ?? [])
+                        : undefined;
+                readingSource = false;
+                await StarboardService.handleReactionUpdate(msg, counts);
             }
         } catch (error) {
             const missing =
@@ -76,7 +109,7 @@ export async function flushStarboard(client: Client) {
                 typeof error === 'object' &&
                 'code' in error &&
                 [10003, 10008].includes(Number(error.code));
-            if (!missing) {
+            if (!readingSource || !missing) {
                 sqlite.run('UPDATE starboard_refresh SET due=? WHERE message_id=? AND revision=?', [
                     Date.now() + 60_000,
                     row.message_id,
