@@ -1,4 +1,4 @@
-import { eq } from 'drizzle-orm';
+import { and, eq, isNull } from 'drizzle-orm';
 import type { GuildMember } from 'discord.js';
 import db from '../../../database/db.js';
 import { verificationCheckpoint, verificationJournal } from '../../../database/schema.js';
@@ -63,5 +63,37 @@ export function checkpoint(guildId: string, observedAt: number) {
     db.insert(verificationCheckpoint)
         .values({ guildId, observedAt })
         .onConflictDoUpdate({ target: verificationCheckpoint.guildId, set: { observedAt } })
+        .run();
+}
+
+export function reserveVerification(key: string) {
+    return (
+        db
+            .insert(verificationJournal)
+            .values({ membership: key, status: 'pending' })
+            .onConflictDoNothing()
+            .returning({ key: verificationJournal.membership })
+            .get() !== undefined
+    );
+}
+
+export function unstartedMemberships() {
+    return db
+        .select({ key: verificationJournal.membership })
+        .from(verificationJournal)
+        .where(
+            and(eq(verificationJournal.status, 'pending'), isNull(verificationJournal.challenge)),
+        )
+        .all();
+}
+export function forgetUnstarted(key: string) {
+    db.delete(verificationJournal)
+        .where(
+            and(
+                eq(verificationJournal.membership, key),
+                eq(verificationJournal.status, 'pending'),
+                isNull(verificationJournal.challenge),
+            ),
+        )
         .run();
 }

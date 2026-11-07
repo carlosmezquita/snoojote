@@ -4,6 +4,8 @@ import { config } from '../../../config.js';
 import verificationService from '../services/VerificationService.js';
 import {
     checkpoint,
+    unstartedMemberships,
+    forgetUnstarted,
     lastObserved,
     membershipKey,
     pendingMemberships,
@@ -12,7 +14,7 @@ import { ensureSuspectLock } from '../services/suspectLock.js';
 
 export const name = Events.ClientReady;
 export const once = true;
-const youngAccountMs = 90 * 86_400_000;
+import { youngAccountMs } from '../services/standbyQuarantine.js';
 const boot = Date.now();
 
 export async function reconcileGuild(guild: Guild, client: DiscordBot, since: number) {
@@ -53,6 +55,34 @@ export async function reconcileGuild(guild: Guild, client: DiscordBot, since: nu
         throw new AggregateError(failures, 'Verification reconciliation incomplete');
 }
 
+export async function drainQuarantines(guild: Guild, client: DiscordBot) {
+    for (const { key } of unstartedMemberships()) {
+        const [guildId, userId] = JSON.parse(key) as [string, string, number];
+        if (guild.id !== guildId) continue;
+        try {
+            const member = await guild.members.fetch({ user: userId, force: true });
+            if (membershipKey(member) !== key) {
+                forgetUnstarted(key);
+                continue;
+            }
+            await verificationService.handleMemberJoin(
+                member,
+                client,
+                member.joinedTimestamp! - member.user.createdTimestamp,
+            );
+        } catch (error) {
+            if (error && typeof error === 'object' && 'code' in error && error.code === 10007)
+                forgetUnstarted(key);
+            else
+                client.logger.error('Verification handoff failed; will retry', {
+                    guildId,
+                    userId,
+                    error,
+                });
+        }
+    }
+}
+
 export const execute = async (client: DiscordBot) => {
     for (const guild of client.guilds.cache.values()) {
         if (config.guildId && guild.id !== config.guildId) continue;
@@ -68,7 +98,7 @@ export const execute = async (client: DiscordBot) => {
                     await reconcileGuild(guild, client, since);
                     await verificationService.cleanupStaleVerificationChannels(client);
                     recovered = true;
-                }
+                } else await drainQuarantines(guild, client);
                 checkpoint(guild.id, Date.now());
             } catch (error) {
                 client.logger.error('Verification recovery failed; will retry', {

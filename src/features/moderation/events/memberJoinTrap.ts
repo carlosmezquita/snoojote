@@ -3,7 +3,7 @@ import { type DiscordBot } from '../../../core/client.js';
 import inviteCache from '../services/InviteCacheService.js';
 import verificationService from '../services/VerificationService.js';
 
-const THREE_MONTHS_MS = 1000 * 60 * 60 * 24 * 90;
+import { youngAccountMs } from '../services/standbyQuarantine.js';
 
 export const name = Events.GuildMemberAdd;
 export const once = false;
@@ -35,8 +35,8 @@ export const execute = async (member: GuildMember, client: DiscordBot) => {
         inviteCode: usedInvite?.code ?? 'unknown',
     });
 
-    const accountAgeMs = Date.now() - member.user.createdTimestamp;
-    if (accountAgeMs > THREE_MONTHS_MS) {
+    const accountAgeMs = (member.joinedTimestamp ?? Date.now()) - member.user.createdTimestamp;
+    if (accountAgeMs > youngAccountMs) {
         client.emit('guildMemberVerified', member);
         return;
     }

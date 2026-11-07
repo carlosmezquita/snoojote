@@ -1,4 +1,6 @@
 import 'dotenv/config';
+import { quarantineJoin } from '../features/moderation/services/standbyQuarantine.js';
+import { ensureSuspectLock } from '../features/moderation/services/suspectLock.js';
 import rewards from '../features/economy/events/messageCreate.js';
 import { Client, Events, GatewayIntentBits, Options } from 'discord.js';
 import { readFileSync, writeFileSync, renameSync } from 'node:fs';
@@ -19,6 +21,7 @@ const seen = new Map<string, number>();
 const client = new Client({
     intents: [
         GatewayIntentBits.Guilds,
+        GatewayIntentBits.GuildMembers,
         GatewayIntentBits.GuildMessages,
         GatewayIntentBits.MessageContent,
     ],
@@ -48,6 +51,18 @@ function heartbeat() {
     )
         process.exit(0);
 }
+client.on(Events.GuildMemberAdd, (member) => {
+    if (shadow || member.guild.id !== config.guildId) return;
+    void quarantineJoin(member).catch((error) =>
+        logger.error('Standby join quarantine failed', { userId: member.id, error }),
+    );
+});
+client.on(Events.ChannelCreate, (channel) => {
+    if (shadow || channel.guild.id !== config.guildId) return;
+    void ensureSuspectLock(channel).catch((error) =>
+        logger.error('Standby suspect lock failed', { channelId: channel.id, error }),
+    );
+});
 client.on(Events.MessageCreate, (message) => {
     if (message.guildId !== config.guildId) return;
     if (!shadow)
