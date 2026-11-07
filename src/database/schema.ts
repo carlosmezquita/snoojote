@@ -306,3 +306,35 @@ export const voiceSessions = sqliteTable(
     },
     (t) => [uniqueIndex('voice_membership').on(t.guildId, t.userId)],
 );
+
+export const gatewayWork = sqliteTable(
+    'gateway_work',
+    {
+        key: text('key').primaryKey(),
+        owner: text('owner').notNull(),
+        resource: text('resource'),
+        started: integer('started').notNull(),
+        finished: integer('finished').notNull().default(0),
+    },
+    (t) => [index('gateway_work_drain').on(t.owner, t.finished)],
+);
+export const gatewayDrain = sqliteTable('gateway_drain', { owner: text('owner').primaryKey() });
+export const starboardRefresh = sqliteTable('starboard_refresh', {
+    messageId: text('message_id').primaryKey(),
+    channelId: text('channel_id').notNull(),
+    revision: integer('revision').notNull(),
+    due: integer('due').notNull(),
+});
+
+export const shopConfirmations = sqliteTable('shop_confirmations', {
+    id: text('id').primaryKey(),
+    guildId: text('guild_id').notNull(),
+    userId: text('user_id').notNull(),
+    itemName: text('item_name').notNull(),
+    price: integer('price').notNull(),
+    expires: integer('expires').notNull(),
+});
+export const inviteBaselines = sqliteTable('invite_baselines', {
+    guildId: text('guild_id').primaryKey(),
+    uses: text('uses').notNull(),
+});

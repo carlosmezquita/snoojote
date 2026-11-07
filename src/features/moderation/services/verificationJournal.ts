@@ -1,6 +1,6 @@
 import { and, eq, isNull } from 'drizzle-orm';
 import type { GuildMember } from 'discord.js';
-import db from '../../../database/db.js';
+import db, { sqlite } from '../../../database/db.js';
 import { verificationCheckpoint, verificationJournal } from '../../../database/schema.js';
 import type { VerificationState } from '../types/verification.js';
 
@@ -96,4 +96,13 @@ export function forgetUnstarted(key: string) {
             ),
         )
         .run();
+}
+
+export function claimAnswer(membership: string, id: string) {
+    return (
+        sqlite.run(
+            "UPDATE verification_journal SET challenge=json_set(challenge,'$.challengeId','') WHERE membership=? AND status='pending' AND json_extract(challenge,'$.challengeId')=?",
+            [membership, id],
+        ).changes === 1
+    );
 }

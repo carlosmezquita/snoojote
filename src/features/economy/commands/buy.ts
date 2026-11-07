@@ -1,3 +1,4 @@
+import { sqlite } from '../../../database/db.js';
 import {
     SlashCommandBuilder,
     type ChatInputCommandInteraction,
@@ -5,7 +6,7 @@ import {
     ActionRowBuilder,
     ButtonBuilder,
     ButtonStyle,
-    ComponentType,
+    type ButtonInteraction,
 } from 'discord.js';
 import { type DiscordBot } from '../../../core/client.js';
 import shopService from '../services/shopService.js';
@@ -78,48 +79,54 @@ export const execute = async (interaction: ChatInputCommandInteraction, client: 
         )
         .setColor(Colors.Warning);
 
+    const id = interaction.id;
+    sqlite.run('DELETE FROM shop_confirmations WHERE expires<=?', [Date.now()]);
+    sqlite.run(
+        'INSERT INTO shop_confirmations(id,guild_id,user_id,item_name,price,expires) VALUES(?,?,?,?,?,?)',
+        [id, interaction.guildId!, interaction.user.id, itemName, item.price, Date.now() + 60000],
+    );
     const row = new ActionRowBuilder<ButtonBuilder>().addComponents(
         new ButtonBuilder()
-            .setCustomId('confirm_buy')
+            .setCustomId('confirm_buy:' + id)
             .setLabel('Confirmar')
             .setStyle(ButtonStyle.Success),
         new ButtonBuilder()
-            .setCustomId('cancel_buy')
+            .setCustomId('cancel_buy:' + id)
             .setLabel('Cancelar')
             .setStyle(ButtonStyle.Danger),
     );
 
-    const response = await interaction.reply({
+    await interaction.reply({
         embeds: [confirmEmbed],
         components: [row],
         ephemeral: true,
     });
-
-    let confirmation;
-    try {
-        confirmation = await response.awaitMessageComponent({
-            componentType: ComponentType.Button,
-            filter: (button) => button.user.id === interaction.user.id,
-            time: 60_000,
-        });
-    } catch {
-        await interaction.editReply({
-            content: 'Tiempo de espera agotado. Compra cancelada.',
-            embeds: [],
-            components: [],
+};
+export async function confirmPurchase(confirmation: ButtonInteraction) {
+    const [action, id] = confirmation.customId.split(':');
+    const row = sqlite
+        .query<{ item_name: string; price: number }, [string, string, string, number]>(
+            'DELETE FROM shop_confirmations WHERE id=? AND user_id=? AND guild_id=? AND expires>? RETURNING item_name,price',
+        )
+        .get(id, confirmation.user.id, confirmation.guildId!, Date.now());
+    if (!row) {
+        await confirmation.reply({
+            content: 'La confirmación ha caducado o ya se ha utilizado.',
+            ephemeral: true,
         });
         return;
     }
-    if (confirmation.customId !== 'confirm_buy') {
+    if (action === 'cancel_buy') {
         await confirmation.update({ content: 'Compra cancelada.', embeds: [], components: [] });
         return;
     }
+    const itemName = row.item_name;
     await confirmation.deferUpdate();
-    const result = await shopService.buyItem(confirmation, itemName);
+    const result = await shopService.buyItem(confirmation, itemName, row.price);
     const resultEmbed = createEmbed(
         result.success ? '¡Compra Exitosa!' : 'Error en la Compra',
         result.message,
         result.success ? Colors.Success : Colors.Error,
     );
-    await interaction.editReply({ embeds: [resultEmbed], components: [] });
-};
+    await confirmation.editReply({ embeds: [resultEmbed], components: [] });
+}

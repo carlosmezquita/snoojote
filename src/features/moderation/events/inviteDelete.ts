@@ -7,6 +7,5 @@ export const once = false;
 
 export const execute = async (invite: Invite, client: DiscordBot) => {
     if (!invite.guild) return;
-    const invites = inviteCache.get(invite.guild.id);
-    if (invites) invites.delete(invite.code);
+    inviteCache.change(invite.guild.id, invite.code, null);
 };

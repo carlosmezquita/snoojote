@@ -5,6 +5,8 @@ import { assertBotConfigReady } from './configLoader.js';
 import { sqlite } from './database/db.js';
 import cron from 'node-cron';
 
+import { initializeDispatch } from './core/restartDispatch.js';
+initializeDispatch();
 const client = new DiscordBot();
 
 client.on('error', (error) => {

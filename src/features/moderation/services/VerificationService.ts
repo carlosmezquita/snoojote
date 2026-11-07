@@ -1,3 +1,5 @@
+import { isWorking } from '../../../core/restartDispatch.js';
+import { claimAnswer } from './verificationJournal.js';
 import {
     type GuildMember,
     ChannelType,
@@ -70,6 +72,8 @@ export class VerificationService {
 
         try {
             if (!record || record.status === 'completed') saveVerification(key);
+            if (record?.challenge && isWorking('verify:' + member.id) && !manual)
+                throw new Error('Verification interaction is still completing');
             const saved: VerificationState | undefined = record?.challenge
                 ? JSON.parse(record.challenge)
                 : undefined;
@@ -174,7 +178,21 @@ export class VerificationService {
         )
             return;
         const userId = interaction.user.id;
-        const userState = this.state.get(userId, interaction.guildId!);
+        let userState = this.state.get(userId, interaction.guildId!);
+        // The interaction can land on the listener that did not issue the CAPTCHA.
+        // Read its current generation before accepting a button or a modal.
+        if (interaction.member && 'joinedTimestamp' in interaction.member) {
+            const key = membershipKey(interaction.member as GuildMember);
+            const row = readVerification(key);
+            if (row?.status === 'pending' && row.challenge) {
+                const saved: VerificationState = JSON.parse(row.challenge);
+                if (userState?.membership === key) {
+                    Object.assign(userState, saved);
+                } else {
+                    userState = { ...saved, membership: key, processing: false, timeouts: [] };
+                }
+            } else userState = undefined;
+        }
         const expectedId = `${interaction.isButton() ? 'verify_btn_' : 'verify_modal_'}${userState?.challengeId}`;
         if (
             !userState ||
@@ -206,6 +224,13 @@ export class VerificationService {
             return;
         }
         if (!interaction.isModalSubmit()) return;
+        if (userState.membership && !claimAnswer(userState.membership, userState.challengeId)) {
+            await interaction.reply({
+                content: 'La verificación ha caducado o ya se está procesando.',
+                ephemeral: true,
+            });
+            return;
+        }
         const answer = interaction.fields.getTextInputValue('captcha_input');
         if (answer.toUpperCase() === userState.answer.toUpperCase()) {
             userState.processing = true;
@@ -292,7 +317,10 @@ export class VerificationService {
                     3000,
                     interaction.channel as TextChannel,
                 );
-            else userState.processing = false;
+            else {
+                userState.processing = false;
+                if (userState.membership) saveVerification(userState.membership, userState);
+            }
         }
     }
 
@@ -512,9 +540,26 @@ export class VerificationService {
         scheduleWarning(8 * 60 * 1000, 'Quedan 2 minutos / 2 minutes remaining');
         scheduleWarning(9.5 * 60 * 1000, '⚠️ **30 segundos restantes / 30 seconds remaining!**');
 
-        const kickTid = setTimeout(
-            async () => {
-                const currentMember = await member.guild.members.fetch(member.id).catch((error) => {
+        const expire = async () => {
+            if (this.state.get(member.id, member.guild.id) !== state) return;
+            if (isWorking('verify:' + member.id) || state.processing) {
+                state.timeouts.push(setTimeout(expire, 1000));
+                return;
+            }
+            if (state.membership && readVerification(state.membership)?.status !== 'pending') {
+                this.cleanupVerificationSession(
+                    member.id,
+                    member.guild.id,
+                    client,
+                    'verification already finished',
+                    0,
+                    channel,
+                );
+                return;
+            }
+            const currentMember = await member.guild.members
+                .fetch({ user: member.id, force: true })
+                .catch((error) => {
                     client.logger.warn('Failed to fetch member for verification timeout', {
                         userId: member.id,
                         guildId: member.guild.id,
@@ -522,53 +567,55 @@ export class VerificationService {
                     });
                     return null;
                 });
-                try {
-                    if (this.state.get(member.id, member.guild.id) !== state || state.processing)
-                        return;
-                    if (
-                        currentMember &&
-                        membershipKey(currentMember) === state.membership &&
-                        currentMember.roles.cache.has(this.SUSPECT_ROLE_ID)
-                    ) {
-                        await currentMember.kick('Tiempo agotado.');
-                        if (state.membership) discardVerification(state.membership);
-                        await this.sendLog(
-                            member.guild,
-                            `💀 **Expulsado (Timeout):** <@${member.id}>`,
-                            client,
-                        );
-                    } else if (currentMember) {
-                        await this.sendLog(
-                            member.guild,
-                            `🧹 **Canal de verificación limpiado:** <@${member.id}> ya no tiene el rol sospechoso.`,
-                            client,
-                        );
-                    } else {
-                        await this.sendLog(
-                            member.guild,
-                            `🧹 **Canal de verificación limpiado:** <@${member.id}> ya no está en el servidor.`,
-                            client,
-                        );
-                    }
-                } catch (error) {
-                    client.logger.error('Verification timeout handling failed', {
-                        userId: member.id,
-                        guildId: member.guild.id,
-                        channelId: channel.id,
-                        error,
-                    });
-                } finally {
-                    if (this.state.get(member.id, member.guild.id) === state && !state.processing)
-                        this.cleanupVerificationSession(
-                            member.id,
-                            member.guild.id,
-                            client,
-                            'verification timeout',
-                            0,
-                            channel,
-                        );
+            try {
+                if (this.state.get(member.id, member.guild.id) !== state || state.processing)
+                    return;
+                if (
+                    currentMember &&
+                    membershipKey(currentMember) === state.membership &&
+                    currentMember.roles.cache.has(this.SUSPECT_ROLE_ID)
+                ) {
+                    await currentMember.kick('Tiempo agotado.');
+                    if (state.membership) discardVerification(state.membership);
+                    await this.sendLog(
+                        member.guild,
+                        `💀 **Expulsado (Timeout):** <@${member.id}>`,
+                        client,
+                    );
+                } else if (currentMember) {
+                    await this.sendLog(
+                        member.guild,
+                        `🧹 **Canal de verificación limpiado:** <@${member.id}> ya no tiene el rol sospechoso.`,
+                        client,
+                    );
+                } else {
+                    await this.sendLog(
+                        member.guild,
+                        `🧹 **Canal de verificación limpiado:** <@${member.id}> ya no está en el servidor.`,
+                        client,
+                    );
                 }
-            },
+            } catch (error) {
+                client.logger.error('Verification timeout handling failed', {
+                    userId: member.id,
+                    guildId: member.guild.id,
+                    channelId: channel.id,
+                    error,
+                });
+            } finally {
+                if (this.state.get(member.id, member.guild.id) === state && !state.processing)
+                    this.cleanupVerificationSession(
+                        member.id,
+                        member.guild.id,
+                        client,
+                        'verification timeout',
+                        0,
+                        channel,
+                    );
+            }
+        };
+        const kickTid = setTimeout(
+            expire,
             state.attempts >= this.MAX_ATTEMPTS ? 0 : Math.max(0, state.expiresAt - this.now()),
         );
 

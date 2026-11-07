@@ -116,8 +116,16 @@ export class StarboardService {
                         starboardMessageId: existing.starboardMessageId,
                         error: e,
                     });
-                    // If message deleted manually from starboard channel, maybe we should treat it as "removed" or repost?
-                    // For now, let's assume if it fails to fetch/edit, we might want to repost if it's 404
+                    if (e && typeof e === 'object' && 'code' in e && e.code === 10008) {
+                        await db
+                            .delete(starboardMessages)
+                            .where(eq(starboardMessages.id, existing.id));
+                        throw new Error(
+                            'Starboard projection disappeared; refresh the source again',
+                            { cause: e },
+                        );
+                    }
+                    throw e;
                 }
             } else {
                 // Create new

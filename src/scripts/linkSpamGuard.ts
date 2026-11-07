@@ -1,3 +1,12 @@
+import { DiscordBot } from '../core/client.js';
+import installCommands from '../core/handlers/commandHandler.js';
+import { initializeDispatch, reportDispatchError } from '../core/restartDispatch.js';
+import { listenForReactions } from '../features/starboard/services/starboardRefresh.js';
+import ai from '../features/ai/events/messageCreate.js';
+import { observeJoin } from '../features/moderation/events/memberJoinTrap.js';
+import { execute as inviteCreate } from '../features/moderation/events/inviteCreate.js';
+import { execute as inviteDelete } from '../features/moderation/events/inviteDelete.js';
+import { execute as welcome } from '../features/welcome/events/guildMemberAdd.js';
 import { execute as requesterJoin } from '../features/tickets/events/requesterJoin.js';
 import { execute as requesterLeave } from '../features/tickets/events/requesterLeave.js';
 import 'dotenv/config';
@@ -5,8 +14,9 @@ import voiceUpdates from '../features/economy/events/voiceStateUpdate.js';
 import { execute as startVoice } from '../features/economy/events/voiceReady.js';
 import { quarantineJoin } from '../features/moderation/services/standbyQuarantine.js';
 import { ensureSuspectLock } from '../features/moderation/services/suspectLock.js';
+import ticketReplies from '../features/tickets/events/messageCreate.js';
 import rewards from '../features/economy/events/messageCreate.js';
-import { Client, Events, GatewayIntentBits, Partials, Options } from 'discord.js';
+import { Events } from 'discord.js';
 import { readFileSync, writeFileSync, renameSync } from 'node:fs';
 import { execFileSync } from 'node:child_process';
 import { config } from '../config.js';
@@ -22,18 +32,24 @@ const shadow = process.env.LINK_GUARD_MODE === 'shadow';
 const started = Date.now();
 const windows = new Map<string, { start: number; count: number }>();
 const seen = new Map<string, number>();
-const client = new Client({
-    partials: [Partials.GuildMember],
-    intents: [
-        GatewayIntentBits.Guilds,
-        GatewayIntentBits.GuildMembers,
-        GatewayIntentBits.GuildVoiceStates,
-        GatewayIntentBits.GuildMessages,
-        GatewayIntentBits.MessageContent,
-    ],
-    allowedMentions: { parse: [] },
-    makeCache: Options.cacheWithLimits({ ...Options.DefaultMakeCacheSettings, MessageManager: 0 }),
-});
+const client = new DiscordBot();
+if (!shadow) {
+    initializeDispatch('standby');
+    await installCommands(client);
+    listenForReactions(client);
+    client.on(
+        'guildMemberVerified',
+        (member) => void welcome(member, client).catch(reportDispatchError),
+    );
+    client.on(Events.InviteCreate, (invite) => {
+        if (invite.guild?.id === config.guildId)
+            void inviteCreate(invite, client).catch(reportDispatchError);
+    });
+    client.on(Events.InviteDelete, (invite) => {
+        if (invite.guild?.id === config.guildId)
+            void inviteDelete(invite, client).catch(reportDispatchError);
+    });
+}
 function heartbeat() {
     if (!client.isReady() || !config.guildId || !client.guilds.cache.get(config.guildId)?.available)
         return;
@@ -76,6 +92,7 @@ client.on(Events.GuildMemberAdd, (member) => {
     } catch (error) {
         logger.error('Standby requester join failed', { error });
     }
+    void observeJoin(member, client).catch(reportDispatchError);
     void quarantineJoin(member).catch((error) =>
         logger.error('Standby join quarantine failed', { userId: member.id, error }),
     );
@@ -88,6 +105,13 @@ client.on(Events.ChannelCreate, (channel) => {
 });
 client.on(Events.MessageCreate, (message) => {
     if (message.guildId !== config.guildId) return;
+    if (!shadow) void ai.execute(message, client).catch(reportDispatchError);
+    if (!shadow)
+        void ticketReplies
+            .execute(message)
+            .catch((error) =>
+                logger.error('Standby ticket reply failed', { messageId: message.id, error }),
+            );
     if (!shadow)
         void rewards
             .execute(message)

@@ -44,6 +44,7 @@ export class ShopService {
     async buyItem(
         interaction: ShopInteraction,
         itemName: string,
+        quotedPrice?: number,
     ): Promise<{ success: boolean; message: string }> {
         const item = await db.select().from(shopItems).where(eq(shopItems.name, itemName)).get();
         const userId = interaction.user.id;
@@ -58,6 +59,8 @@ export class ShopService {
             return { success: false, message: 'El artículo no existe.' };
         }
 
+        if (quotedPrice !== undefined && quotedPrice !== item.price)
+            return { success: false, message: 'El precio ha cambiado. Vuelve a usar /comprar.' };
         const isConsumable = item.type === 'CONSUMABLE';
         const catalogItem = this.getCatalogItem(item.name);
         const purchaseMetadata = {
