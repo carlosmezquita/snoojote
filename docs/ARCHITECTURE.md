@@ -4,15 +4,18 @@
 
 ```mermaid
 flowchart LR
-    G[Discord Gateway] --> H[Command and event handlers]
-    H --> C[In-process concurrency guards]
-    C --> D[Domain services]
-    D --> T[Synchronous SQLite WAL transactions]
+    P[Primary Discord listener] --> H[Command and event handlers]
+    S[Standby Discord listener] --> H
+    H --> T[Shared SQLite claims and receipts]
+    H --> D[Domain services]
+    D --> T
     D --> R[Asynchronous Discord REST calls]
     R --> D
 ```
 
-One Bun process owns the gateway connection, in-memory coordination and SQLite database. Handlers dispatch interactions to feature services. A transaction commits a reservation or debit before external I/O begins. A second transaction records the observed result. WAL and full synchronous durability protect committed local state across a restart. External calls can succeed even when their response never reaches the process.
+The primary Bun process owns periodic content jobs. An optional standby listener on the same VPS uses the same SQLite database to claim interactions and continue supported workflows during planned restarts. In-memory coordination remains local to each process. See [commands and community events across restarts](OPERATIONS.md#commands-and-community-events-across-restarts) for handoff behavior and limits.
+
+For operations such as role purchases, a transaction commits a reservation or debit before external I/O begins. A second transaction records the observed result. WAL and full synchronous durability protect committed local state across a restart. External calls can succeed even when their response never reaches the process.
 
 ## Purchase and ticket recovery
 
