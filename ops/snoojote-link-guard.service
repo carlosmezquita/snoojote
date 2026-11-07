@@ -11,7 +11,7 @@ WorkingDirectory=/opt/snoojote
 ExecStart=/usr/local/lib/snoojote/bun src/scripts/linkSpamGuard.ts
 Restart=always
 RestartSec=2
-TimeoutStopSec=15
+TimeoutStopSec=135
 UMask=0077
 Environment=SNOOJOTE_LINK_GUARD=1
 Environment=PATH=/var/lib/snoojote/.bun/bin:/usr/local/bin:/usr/bin:/bin

@@ -5,7 +5,7 @@ import { assertBotConfigReady } from './configLoader.js';
 import { sqlite } from './database/db.js';
 import cron from 'node-cron';
 
-import { initializeDispatch } from './core/restartDispatch.js';
+import { initializeDispatch, drainBeforeExit } from './core/restartDispatch.js';
 initializeDispatch();
 const client = new DiscordBot();
 
@@ -17,10 +17,11 @@ let stopping = false;
 async function shutdown(code: number) {
     if (stopping) return;
     stopping = true;
-    const deadline = setTimeout(() => process.exit(code || 1), 5000);
+    const deadline = setTimeout(() => process.exit(code || 1), 130000);
     deadline.unref();
     try {
         for (const task of cron.getTasks().values()) task.stop();
+        if (code === 0) await drainBeforeExit();
         await client.destroy();
         sqlite.close();
         await new Promise<void>((resolve) => {

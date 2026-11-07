@@ -1,3 +1,6 @@
+import { Collection } from 'discord.js';
+import { observeJoin } from '../src/features/moderation/events/memberJoinTrap.js';
+import inviteCache from '../src/features/moderation/services/InviteCacheService.js';
 import { afterEach, expect, spyOn, test } from 'bun:test';
 import { sqlite } from '../src/database/db.js';
 import { serveOnce, isWorking } from '../src/core/restartDispatch.js';
@@ -178,4 +181,42 @@ test('cutover with Gateway delivery skew still runs the interaction once', async
         serveOnce('test:skew', () => calls.push('primary'), { who: 'primary' }),
     ]);
     expect(calls).toEqual(['standby']);
+});
+
+test('join observation survives receiver rotation and ambiguous invite changes stay unknown', async () => {
+    const info: string[] = [];
+    let welcomes = 0;
+    let counts = [2, 1];
+    const guild = {
+        id: 'restart-invites',
+        invites: {
+            fetch: async () =>
+                new Collection(['a', 'b'].map((code, i) => [code, { code, uses: counts[i] }])),
+        },
+    };
+    const client = {
+        logger: {
+            info: (_: string, data: { inviteCode: string }) => info.push(data.inviteCode),
+            warn: () => {},
+        },
+        emit: () => {
+            welcomes++;
+        },
+    };
+    const member = (joinedTimestamp: number) =>
+        ({ guild, id: 'member', joinedTimestamp, user: { createdTimestamp: 0 } }) as never;
+    inviteCache.set(
+        guild.id,
+        new Collection([
+            ['a', 1],
+            ['b', 1],
+        ]),
+    );
+    const first = member(100 * 86400000);
+    await Promise.all([observeJoin(first, client as never), observeJoin(first, client as never)]);
+    counts = [3, 2];
+    await observeJoin(member(101 * 86400000), client as never);
+    expect(info).toEqual(['a', 'unknown']);
+    expect(welcomes).toBe(2);
+    expect(inviteCache.get(guild.id)?.get('b')).toBe(2);
 });

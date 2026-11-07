@@ -99,6 +99,24 @@ refresh_guard() {
     echo 'Link guard did not become ready on requested revision.'
     return 1
 }
+route_away() {
+    [[ -e .git/snoojote-link-guard-enabled ]] || return 0
+    local owner=$1 remaining
+    sqlite3 -cmd '.timeout 5000' data/database.sqlite "BEGIN IMMEDIATE; DELETE FROM gateway_drain; INSERT INTO gateway_drain(owner) VALUES('$owner'); COMMIT;" || return 1
+    for ((attempt=0; attempt<120; attempt++)); do
+        remaining=$(sqlite3 -cmd '.timeout 5000' data/database.sqlite "SELECT count(*) FROM gateway_work WHERE owner='$owner' AND finished=0") || return 1
+        if [[ "$remaining" == 0 ]]; then
+            echo "Drained $owner; no accepted gateway work remains."
+            return 0
+        fi
+        sleep 1
+    done
+    echo "$owner still has unfinished work; refusing to stop it."
+    return 1
+}
+resume_dispatch() {
+    [[ ! -e .git/snoojote-link-guard-enabled ]] || sqlite3 -cmd '.timeout 5000' data/database.sqlite 'DELETE FROM gateway_drain'
+}
 rollback() {
     trap - ERR HUP INT TERM
     set +e
@@ -112,9 +130,10 @@ rollback() {
     }
     git checkout --detach "$previous" && restore_modules && {
         offset=$(log_offset)
-        sudo -n systemctl start snoojote && wait_ready "$offset" && refresh_guard "$previous"
+        sudo -n systemctl start snoojote && wait_ready "$offset" && route_away standby && refresh_guard "$previous"
     }
     rollback_status=$?
+    resume_dispatch
     if [[ "$rollback_status" != 0 ]]; then
         echo 'ROLLBACK FAILED: inspect snoojote.service and logs/error.log immediately.'
     else
@@ -131,6 +150,7 @@ if [[ -e .git/snoojote-link-guard-enabled ]]; then
     # A docs-only release may have advanced HEAD without restarting either service.
     await_guard_pulse || { echo 'Link guard offline; keeping primary online.'; exit 1; }
 fi
+route_away primary || { resume_dispatch; exit 1; }
 trap rollback ERR HUP INT TERM
 sudo -n systemctl stop snoojote
 # Preserve ignored runtime files and untracked server backups; never git clean/reset.
@@ -145,8 +165,10 @@ bun run deploy
 trap - ERR HUP INT TERM
 rm -rf -- "$stage/previous-modules"
 # Primary is serving. Do not take it offline to roll back a failed standby rotation.
-if ! refresh_guard "$sha"; then
+if ! route_away standby || ! refresh_guard "$sha"; then
+    resume_dispatch
     echo 'Primary remains online; inspect snoojote-link-guard.service before the next rollout.'
     exit 1
 fi
+resume_dispatch
 echo "Deployed $sha"

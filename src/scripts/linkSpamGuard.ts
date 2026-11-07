@@ -1,6 +1,10 @@
 import { DiscordBot } from '../core/client.js';
 import installCommands from '../core/handlers/commandHandler.js';
-import { initializeDispatch, reportDispatchError } from '../core/restartDispatch.js';
+import {
+    initializeDispatch,
+    drainBeforeExit,
+    reportDispatchError,
+} from '../core/restartDispatch.js';
 import { listenForReactions } from '../features/starboard/services/starboardRefresh.js';
 import ai from '../features/ai/events/messageCreate.js';
 import { observeJoin } from '../features/moderation/events/memberJoinTrap.js';
@@ -50,7 +54,23 @@ if (!shadow) {
             void inviteDelete(invite, client).catch(reportDispatchError);
     });
 }
+let stopping = false;
+async function shutdown() {
+    if (stopping) return;
+    stopping = true;
+    try {
+        if (!shadow) await drainBeforeExit();
+        await client.destroy();
+        process.exit(0);
+    } catch (error) {
+        reportDispatchError(error);
+        process.exit(1);
+    }
+}
+process.once('SIGTERM', () => void shutdown());
+process.once('SIGINT', () => void shutdown());
 function heartbeat() {
+    if (stopping) return;
     if (!client.isReady() || !config.guildId || !client.guilds.cache.get(config.guildId)?.available)
         return;
     if (!shadow) {
@@ -71,7 +91,7 @@ function heartbeat() {
         desired !== revision &&
         desired === execFileSync('git', ['rev-parse', 'HEAD'], { encoding: 'utf8' }).trim()
     )
-        process.exit(0);
+        void shutdown();
 }
 client.on(Events.VoiceStateUpdate, (oldState, newState) => {
     if (shadow || newState.guild.id !== config.guildId) return;

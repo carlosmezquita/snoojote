@@ -11,7 +11,7 @@ WorkingDirectory=/opt/snoojote
 ExecStart=/usr/local/lib/snoojote/bun src/index.ts
 Restart=always
 RestartSec=5
-TimeoutStopSec=15
+TimeoutStopSec=135
 UMask=0077
 Environment=PATH=/var/lib/snoojote/.bun/bin:/usr/local/bin:/usr/bin:/bin
 NoNewPrivileges=true

@@ -2,7 +2,9 @@ import { sqlite } from '../database/db.js';
 import logger from '../utils/logger.js';
 export type Receiver = 'primary' | 'standby';
 export const receiver: Receiver = process.env.SNOOJOTE_LINK_GUARD === '1' ? 'standby' : 'primary';
+let stopping = false;
 const drained = (who: Receiver) =>
+    (who === receiver && stopping) ||
     !!sqlite.query('SELECT 1 FROM gateway_drain WHERE owner=?').get(who);
 export function initializeDispatch(who = receiver) {
     // systemd runs exactly one process per unit. Its predecessor is gone.
@@ -73,4 +75,22 @@ export async function serveOnce(key: string, work: () => unknown, options: Dispa
 }
 export function reportDispatchError(error: unknown) {
     logger.error('Gateway dispatch failed', { error });
+}
+
+export async function drainBeforeExit() {
+    stopping = true;
+    const until = Date.now() + 120000;
+    while (
+        sqlite
+            .query('SELECT 1 FROM gateway_work WHERE owner=? AND finished=0 LIMIT 1')
+            .get(receiver)
+    ) {
+        if (Date.now() >= until) {
+            logger.error('Service shutdown timed out waiting for accepted gateway work', {
+                receiver,
+            });
+            break;
+        }
+        await new Promise((resolve) => setTimeout(resolve, 100));
+    }
 }

@@ -44,12 +44,18 @@ case "$name" in
         fi
         if [[ ${SCENARIO:-} == commands && "$1" == run ]]; then exit 1; fi ;;
     sqlite3)
+        if [[ "$1" == -cmd ]]; then
+            if [[ "$4" == SELECT* ]]; then
+                if [[ "$SCENARIO" == guard_drain ]]; then echo 1; else echo 0; fi
+            fi
+            exit 0
+        fi
         backup=${2#.backup }
         backup=${backup#\'}
         backup=${backup%\'}
         : > "$backup" ;;
     sleep)
-        if [[ "$SCENARIO" == guard_success || "$SCENARIO" == guard_startup ]]; then
+        if [[ "$SCENARIO" == guard_success || "$SCENARIO" == guard_startup || "$SCENARIO" == guard_drain ]]; then
             touch "$FIXTURE/app/data/link-guard.ready"
         fi
         if [[ "$SCENARIO" == guard_success && -f "$FIXTURE/app/.git/snoojote-link-guard-ref" ]]; then
@@ -60,7 +66,7 @@ MOCK
 chmod +x "$fixture/bin/mock"
 for command in git sudo bun sqlite3 sleep; do ln -s mock "$fixture/bin/$command"; done
 
-for scenario in success docs dirty schema install startup commands guard_offline guard_success guard_startup; do
+for scenario in success docs dirty schema install startup commands guard_offline guard_success guard_startup guard_drain; do
     export SCENARIO=$scenario
     mkdir -p "$fixture/app/.git" "$fixture/app/config" "$fixture/app/data" "$fixture/app/logs"
     mkdir -p "$fixture/app/node_modules"
@@ -92,7 +98,7 @@ for scenario in success docs dirty schema install startup commands guard_offline
     else
         [[ "$result" != 0 && $(cat "$fixture/revision") == "$OLD_SHA" ]]
         [[ -f "$fixture/app/node_modules/original" && ! -e "$fixture/app/node_modules/prepared" ]]
-        if [[ "$scenario" == dirty || "$scenario" == schema || "$scenario" == install || "$scenario" == guard_offline ]]; then
+        if [[ "$scenario" == dirty || "$scenario" == schema || "$scenario" == install || "$scenario" == guard_offline || "$scenario" == guard_drain ]]; then
             if grep -q 'systemctl stop' "$fixture/calls"; then exit 1; fi
         else
             grep -q 'Previous code restored' "$fixture/output"
