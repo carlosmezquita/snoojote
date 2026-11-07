@@ -1,137 +1,124 @@
-import { Events, type Message, PermissionsBitField, type TextChannel } from 'discord.js';
-import { type DiscordBot } from '../../../core/client.js';
+import { Events, PermissionsBitField, type Client, type Message } from 'discord.js';
 import { config } from '../../../config.js';
 import { extractLinks, areLinksWhitelisted } from '../../../shared/utils/links.js';
 import { createWarningEmbed, createErrorEmbed } from '../../../shared/utils/embeds.js';
-import { RateLimitService } from '../../../shared/services/RateLimitService.js';
-import moderationService from '../../../shared/services/ModerationService.js';
 import logger from '../../../utils/logger.js';
-
-const COOLDOWN_SECS = 60;
-const LINKS_LIMIT = 1;
-const WARNS_LIMIT = 3;
-const SEND_ALERT = true;
-
-const rateLimiter = new RateLimitService(COOLDOWN_SECS);
+import {
+    recordLink,
+    enforceLink,
+    type LinkEvent,
+    type SpamActions,
+} from '../services/linkSpamJournal.js';
+export { getLinkRateLimitDecision } from '../services/linkSpamJournal.js';
 
 export const name = Events.MessageCreate;
 export const once = false;
-
-export const execute = async (message: Message, client: DiscordBot) => {
-    if (shouldIgnoreMessage(message)) return;
-
-    const linkList = extractLinks(message.content);
-    if (linkList.length === 0) return;
-
-    if (areLinksWhitelisted(linkList, config.links.whitelist)) return;
-
-    await handleSpam(message, client);
-};
-
-function shouldIgnoreMessage(message: Message): boolean {
-    if (message.author.bot || !message.guild || !message.member) return true;
-
+export function eligible(message: Message) {
     if (
+        !message.guild ||
+        !message.member ||
+        message.author.bot ||
         message.member.permissions.has(PermissionsBitField.Flags.Administrator) ||
-        message.member.permissions.has(PermissionsBitField.Flags.ManageMessages)
-    ) {
-        return true;
-    }
-
-    if (config.roles.linkWhitelist.some((roleId) => message.member?.roles.cache.has(roleId))) {
-        return true;
-    }
-
-    return false;
+        message.member.permissions.has(PermissionsBitField.Flags.ManageMessages) ||
+        config.roles.linkWhitelist.some((id) => message.member!.roles.cache.has(id))
+    )
+        return false;
+    const links = extractLinks(message.content);
+    return links.length > 0 && !areLinksWhitelisted(links, config.links.whitelist);
+}
+const reason = 'Automatic ban for exceeding the link rate limit multiple times.';
+function discordCode(error: unknown, code: number) {
+    return !!error && typeof error === 'object' && 'code' in error && error.code === code;
 }
 
-async function handleSpam(message: Message, client: DiscordBot) {
-    const currentCount = rateLimiter.check(`${message.guildId}:${message.author.id}`);
-    const decision = getLinkRateLimitDecision(currentCount);
-    if (!decision.shouldDelete) return;
-
-    const alertsChannel = client.channels.cache.get(config.channels.alerts) as TextChannel;
-
-    // Enforce first. Notification failures must never prevent deletion or a sanction.
-    await message.delete().catch((error) => {
-        client.logger.warn('Failed to delete link spam message', { messageId: message.id, error });
-    });
-    if (decision.shouldBan)
-        await banUser(message, alertsChannel).catch((error) => {
-            client.logger.error('Failed to ban link spam member', {
-                userId: message.author.id,
-                error,
-            });
-        });
-    else await sendWarning(message, decision.violationCount);
-    if (SEND_ALERT && alertsChannel?.isTextBased()) {
-        await sendAlertLog(message, alertsChannel, decision.violationCount).catch((error) => {
-            client.logger.warn('Failed to log link spam', { messageId: message.id, error });
-        });
-    }
-}
-
-export function getLinkRateLimitDecision(currentCount: number): {
-    shouldDelete: boolean;
-    shouldBan: boolean;
-    violationCount: number;
-} {
-    const violationCount = Math.max(currentCount - LINKS_LIMIT, 0);
-
+export function actionsFor(
+    client: Client,
+    event: LinkEvent,
+    count: number,
+    message?: Message,
+): SpamActions {
+    const { userId, guildId, channelId, messageId } = event;
+    const guild = message?.guild ?? client.guilds.cache.get(guildId);
+    if (!guild) throw new Error('Link moderation guild unavailable');
+    const sendAlert = async (embed: ReturnType<typeof createErrorEmbed>) => {
+        const channel = client.channels.cache.get(config.channels.alerts);
+        if (!channel?.isSendable()) throw new Error('Moderation alerts channel unavailable');
+        await channel.send({ embeds: [embed], allowedMentions: { parse: [] } });
+    };
     return {
-        shouldDelete: violationCount > 0,
-        shouldBan: violationCount >= WARNS_LIMIT,
-        violationCount,
+        async remove() {
+            try {
+                if (message) await message.delete();
+                else await client.rest.delete(`/channels/${channelId}/messages/${messageId}`);
+            } catch (error) {
+                if (!discordCode(error, 10008)) throw error;
+            }
+        },
+        async ban() {
+            await guild.members.ban(userId, { reason, deleteMessageSeconds: 43200 });
+        },
+        async isBanned() {
+            try {
+                return !!(await guild.bans.fetch({ user: userId, force: true }));
+            } catch (error) {
+                if (discordCode(error, 10026)) return false;
+                throw error;
+            }
+        },
+        async dm() {
+            const user = message?.author ?? (await client.users.fetch(userId));
+            await user.send({
+                embeds: [
+                    count === 4
+                        ? createErrorEmbed(
+                              'Baneado',
+                              `Has sido baneado del servidor.\n**Razón:** ${reason}`,
+                          )
+                        : createWarningEmbed(
+                              '⚠️ ATENCIÓN',
+                              `Has excedido el límite de envío de enlaces (1/60s). Por favor, espera.\n\nAvisos: ${count - 1}/3`,
+                          ),
+                ],
+            });
+        },
+        async alert() {
+            await sendAlert(
+                createErrorEmbed(
+                    'Protección automática contra spam',
+                    'El usuario ha superado la tasa permitida de envío de enlaces',
+                ).addFields(
+                    { name: 'Autor', value: `<@${userId}>`, inline: true },
+                    { name: 'Avisos', value: String(count - 1), inline: true },
+                    { name: 'Canal', value: `<#${channelId}>`, inline: true },
+                    { name: 'Mensaje', value: message?.content.slice(0, 1024) || messageId },
+                ),
+            );
+        },
+        async banLog() {
+            await sendAlert(
+                createErrorEmbed(
+                    'Usuario Baneado',
+                    `<@${userId}> ha sido baneado.\n**Razón:** ${reason}`,
+                ),
+            );
+        },
+        failed(action, error) {
+            logger.warn('Link moderation action failed', { messageId, action, error });
+        },
     };
 }
 
-async function sendWarning(message: Message, violationCount: number) {
-    try {
-        await message.author.send({
-            embeds: [
-                createWarningEmbed(
-                    ':warning: ATENCIÓN',
-                    `Has excedido el límite de envío de enlaces (${LINKS_LIMIT}/${COOLDOWN_SECS}s). Por favor, espera.\n\nAvisos: ${violationCount}/${WARNS_LIMIT}`,
-                ),
-            ],
-        });
-    } catch (err) {
-        logger.warn('Failed to send link spam warning DM', {
-            userId: message.author.id,
-            userTag: message.author.tag,
-            error: err,
-        });
-    }
-}
-
-async function sendAlertLog(message: Message, channel: TextChannel, violationCount: number) {
-    await channel.send({
-        embeds: [
-            createErrorEmbed(
-                'Protección automática contra spam',
-                `El usuario ha superado la tasa permitida de envío de enlaces`,
-            ).addFields(
-                { name: 'Autor', value: message.author.toString(), inline: true },
-                { name: `Avisos`, value: `${violationCount}/${WARNS_LIMIT}`, inline: true },
-                { name: 'Canal', value: message.channel.toString(), inline: true },
-                {
-                    name: 'Mensaje',
-                    value: message.content.slice(0, 1024) || '[sin texto]',
-                    inline: false,
-                },
-            ),
-        ],
-    });
-}
-
-async function banUser(message: Message, alertsChannel: TextChannel) {
-    const member = message.member;
-    if (!member) return;
-
-    await moderationService.ban(
-        member,
-        'Automatic ban for exceeding the link rate limit multiple times.',
-        12 * 3600, // Delete messages from last 12 hours
-        alertsChannel,
-    );
+export async function execute(message: Message, client: Client, delayMs = 0) {
+    if (!eligible(message)) return;
+    const event = {
+        guildId: message.guildId!,
+        channelId: message.channelId,
+        userId: message.author.id,
+        messageId: message.id,
+        observedAt: message.createdTimestamp,
+    };
+    const count = recordLink(event);
+    if (delayMs && count && count > 1) await new Promise((resolve) => setTimeout(resolve, delayMs));
+    if (count && count > 1)
+        await enforceLink(event.messageId, count, actionsFor(client, event, count, message));
 }

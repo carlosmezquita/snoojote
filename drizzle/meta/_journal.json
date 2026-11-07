@@ -99,6 +99,13 @@
             "when": 1794061148150,
             "tag": "0013_verification_recovery",
             "breakpoints": true
+        },
+        {
+            "idx": 14,
+            "version": "6",
+            "when": 1794062812096,
+            "tag": "0014_link_spam_journal",
+            "breakpoints": true
         }
     ]
 }

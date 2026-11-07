@@ -154,7 +154,15 @@ describe('moderation isolation', () => {
             author: { id: userId, bot: false, send: async () => {}, toString: () => userId },
             content: `https://evil.test/${'x'.repeat(2000)}`,
             member,
-            guild: { id: 'guild' },
+            guild: {
+                id: 'guild',
+                members: { ban: member.ban },
+                bans: {
+                    fetch: async () => {
+                        throw Object.assign(new Error('Unknown ban'), { code: 10026 });
+                    },
+                },
+            },
             guildId: 'guild',
             channelId: 'channel',
             channel: { toString: () => 'channel' },
@@ -178,7 +186,11 @@ describe('moderation isolation', () => {
                 ]),
             },
         });
-        for (let i = 0; i < 4; i++) await moderate(message as never, client);
+        for (let i = 0; i < 4; i++)
+            await moderate(
+                { ...message, id: randomUUID(), createdTimestamp: Date.now() } as never,
+                client,
+            );
         expect(deleted).toBe(3);
         expect(banned).toBe(1);
     });

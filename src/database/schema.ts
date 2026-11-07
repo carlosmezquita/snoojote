@@ -248,3 +248,29 @@ export const verificationCheckpoint = sqliteTable('verification_checkpoint', {
     guildId: text('guild_id').primaryKey(),
     observedAt: integer('observed_at').notNull(),
 });
+
+export const linkSpamEvents = sqliteTable(
+    'link_spam_events',
+    {
+        messageId: text('message_id').primaryKey(),
+        guildId: text('guild_id').notNull(),
+        userId: text('user_id').notNull(),
+        channelId: text('channel_id').notNull(),
+        observedAt: integer('observed_at').notNull(),
+        windowStart: integer('window_start').notNull(),
+        count: integer('count').notNull(),
+        required: integer('required').notNull(),
+        claimed: integer('claimed').notNull().default(0),
+        finished: integer('finished').notNull().default(0),
+        done: integer('done').notNull().default(0),
+    },
+    (t) => ({
+        memberWindow: index('link_spam_member_window').on(
+            t.guildId,
+            t.userId,
+            t.windowStart,
+            t.count,
+        ),
+        pending: index('link_spam_pending').on(t.done, t.observedAt),
+    }),
+);
