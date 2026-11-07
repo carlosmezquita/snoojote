@@ -290,3 +290,17 @@ export const messageRewardReceipts = sqliteTable(
             .where(sql`${t.rewardEligible} = 1`),
     }),
 );
+
+export const voiceSessions = sqliteTable(
+    'voice_sessions',
+    {
+        guildId: text('guild_id').notNull(),
+        userId: text('user_id').notNull(),
+        channelId: text('channel_id'),
+        sessionId: text('session_id'),
+        cursor: integer('cursor').notNull(),
+        confirmedAt: integer('confirmed_at').notNull(),
+        revision: integer('revision').notNull(),
+    },
+    (t) => [uniqueIndex('voice_membership').on(t.guildId, t.userId)],
+);

@@ -3,8 +3,7 @@ import { type DiscordBot } from '../../../core/client.js';
 import economyService from '../services/economyService.js';
 import { createEmbed, Colors } from '../../../shared/utils/embeds.js';
 import questService, { QuestType } from '../services/questService.js';
-import voiceSessionService from '../services/voiceSessionService.js';
-import { applyVoiceMinutes } from '../events/voiceStateUpdate.js';
+import { collectVoice } from '../services/voiceLedger.js';
 
 export const data = new SlashCommandBuilder()
     .setName('daily')
@@ -71,21 +70,7 @@ async function syncActiveVoiceQuestProgress(
     const channelId = member.voice.channelId;
     if (!channelId || questService.isExcludedQuestChannel(channelId)) return;
 
-    const activeSession = voiceSessionService.getSession(interaction.user.id);
-    if (!activeSession) {
-        voiceSessionService.start(interaction.user.id, channelId);
-        return;
-    }
-
-    for (const elapsed of voiceSessionService.collectDated(interaction.user.id)) {
-        await applyVoiceMinutes(
-            interaction.user.id,
-            elapsed.channelId,
-            elapsed.minutes,
-            member.voice,
-            elapsed.earnedAt,
-        );
-    }
+    await collectVoice(member.voice);
 }
 
 function createProgressBar(current: number, goal: number, size: number = 10): string {

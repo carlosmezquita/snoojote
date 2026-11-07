@@ -272,8 +272,11 @@ For a legacy bot cutover, preserve its config, storage, transcripts, secrets and
   Oversized tickets or failed file copies remain available for retry/manual export. A failed archive
   may leave partial copies in the archive channel; the final transcript marks a completed export.
   Discord deletion failures preserve a retryable record. Discord retention is not an external backup.
-- Voice sessions live in memory. Restarts begin voice accounting anew;
-  abandoned verification channels are cleaned up. Voice rewards are split by Madrid calendar date.
+- Both gateways track voice sessions. A move, leave or voice quest collection commits earned minutes,
+  balance changes and quest progress with the session cursor. Startup resumes matching sessions.
+  A 15-second checkpoint records confirmed presence. After a gap longer than 45 seconds without
+  confirmation, recovery pays through the last observation and starts timing again. Offline moves
+  and departures have no reliable historical timestamp. Currency caps use the Madrid earning date.
 - Streaks use configured channels and meaningful messages of at least ten characters. Daily quest
   rollover uses Madrid dates; claiming retains a rolling 24-hour cooldown.
 - Scheduled sends use a local in-flight guard and Discord nonces to reduce duplicate retries.

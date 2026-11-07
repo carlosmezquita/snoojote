@@ -1,4 +1,6 @@
 import 'dotenv/config';
+import voiceUpdates from '../features/economy/events/voiceStateUpdate.js';
+import { execute as startVoice } from '../features/economy/events/voiceReady.js';
 import { quarantineJoin } from '../features/moderation/services/standbyQuarantine.js';
 import { ensureSuspectLock } from '../features/moderation/services/suspectLock.js';
 import rewards from '../features/economy/events/messageCreate.js';
@@ -22,6 +24,7 @@ const client = new Client({
     intents: [
         GatewayIntentBits.Guilds,
         GatewayIntentBits.GuildMembers,
+        GatewayIntentBits.GuildVoiceStates,
         GatewayIntentBits.GuildMessages,
         GatewayIntentBits.MessageContent,
     ],
@@ -51,6 +54,12 @@ function heartbeat() {
     )
         process.exit(0);
 }
+client.on(Events.VoiceStateUpdate, (oldState, newState) => {
+    if (shadow || newState.guild.id !== config.guildId) return;
+    void voiceUpdates
+        .execute(oldState, newState)
+        .catch((error) => logger.error('Standby voice transition failed', { error }));
+});
 client.on(Events.GuildMemberAdd, (member) => {
     if (shadow || member.guild.id !== config.guildId) return;
     void quarantineJoin(member).catch((error) =>
@@ -104,7 +113,10 @@ client.on(Events.MessageCreate, (message) => {
     );
 });
 client.once(Events.ClientReady, () => {
-    if (!shadow) startLinkRecovery(client);
+    if (!shadow) {
+        startVoice(client);
+        startLinkRecovery(client);
+    }
     heartbeat();
     setInterval(heartbeat, 3000).unref();
     logger.info('Link guard ready', { revision, shadow });
