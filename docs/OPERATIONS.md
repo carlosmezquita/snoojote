@@ -228,8 +228,7 @@ runs at startup and every five minutes. Preserve the topic marker while creation
 
 Transcripts paginate history with an 8 MiB / 10,000-message export budget. Failed or oversized
 exports preserve the ticket for manual export; closure and deletion require an available archive
-channel. Discord attachment limits can still reject an upload. Verification sessions are held in memory, so they do
-not survive a restart. Existing stale-channel cleanup handles abandoned verification channels.
+channel. Discord attachment limits can still reject an upload. Migration 0013 journals verification per guild membership. Pending challenges resume with their original attempt count and deadline. Completion clears the stored answer. On startup the bot fetches current members and channels, verifies eligible joins since the last checkpoint, and repairs suspect-role denies on new channels. Recovery requires member intent, role management and channel management permissions. A failed sweep is retried every 30 seconds. On the first rollout the scan looks back one minute and adopts existing eligible suspect-role members.
 
 ### Runtime Invariants Update
 
@@ -273,7 +272,7 @@ For a legacy bot cutover, preserve its config, storage, transcripts, secrets and
   Oversized tickets or failed file copies remain available for retry/manual export. A failed archive
   may leave partial copies in the archive channel; the final transcript marks a completed export.
   Discord deletion failures preserve a retryable record. Discord retention is not an external backup.
-- Voice sessions and verification challenges live in memory. Restarts begin voice accounting anew;
+- Voice sessions live in memory. Restarts begin voice accounting anew;
   abandoned verification channels are cleaned up. Voice rewards are split by Madrid calendar date.
 - Streaks use configured channels and meaningful messages of at least ten characters. Daily quest
   rollover uses Madrid dates; claiming retains a rolling 24-hour cooldown.

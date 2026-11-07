@@ -64,7 +64,7 @@ export const execute = async (interaction: ChatInputCommandInteraction, client: 
     const accountAgeMs = Date.now() - targetMember.user.createdTimestamp;
 
     try {
-        await verificationService.handleMemberJoin(targetMember, client, accountAgeMs);
+        await verificationService.handleMemberJoin(targetMember, client, accountAgeMs, true);
 
         const embed = createEmbed(
             'Challenge Initiated',

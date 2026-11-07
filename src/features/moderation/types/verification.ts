@@ -1,4 +1,5 @@
 export interface VerificationState {
+    membership?: string;
     guildId: string;
     challengeId: string;
     answer: string;

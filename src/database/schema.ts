@@ -237,3 +237,14 @@ export const shopPurchases = sqliteTable(
             .where(sql`${table.status} = 'pending'`),
     }),
 );
+
+export const verificationJournal = sqliteTable('verification_journal', {
+    membership: text('membership').primaryKey(),
+    status: text('status', { enum: ['pending', 'completed'] }).notNull(),
+    challenge: text('challenge'),
+});
+
+export const verificationCheckpoint = sqliteTable('verification_checkpoint', {
+    guildId: text('guild_id').primaryKey(),
+    observedAt: integer('observed_at').notNull(),
+});

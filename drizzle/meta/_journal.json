@@ -92,6 +92,13 @@
             "when": 1793054540035,
             "tag": "0012_ticket_wait_outcomes",
             "breakpoints": true
+        },
+        {
+            "idx": 13,
+            "version": "6",
+            "when": 1794061148150,
+            "tag": "0013_verification_recovery",
+            "breakpoints": true
         }
     ]
 }
