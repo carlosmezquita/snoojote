@@ -286,6 +286,16 @@ For a legacy bot cutover, preserve its config, storage, transcripts, secrets and
 - Logs rotate by size. Control verbosity and retention with `LOG_LEVEL`, `LOG_MAX_FILE_SIZE_BYTES`,
   and `LOG_MAX_FILES`. Bot/API secrets are redacted from formatted logs.
 
+### Link-spam moderation during deployments
+
+The main bot and the independently supervised `snoojote-link-guard.service` share migration 0014. The guard subscribes only to guild messages and guild metadata. It loads no command handlers, schedulers, ticket or reward workers. Both receivers check the same exemptions and URL allowlist. SQLite records one decision per Discord message ID and counts eligible messages in a fixed 60-second member/guild window. The fourth message owns the ban for that window. The guard normally gives the main process 750 ms to perform the recorded actions, then checks the shared journal.
+
+Each deletion, ban, DM and alert is claimed separately. Recovery can repeat an idempotent deletion and checks Discord for an ambiguous ban. An absent ambiguous ban or an unissued ban older than five minutes requires moderator review. Inspect `SELECT message_id,guild_id,user_id FROM link_spam_events WHERE done=2` and the moderation logs before acting. A claimed DM or audit message may be lost if a sender crashes; recovery never blindly resends it. Finished IDs expire after seven days and events older than that are ignored. The journal stores IDs and counts without message bodies.
+
+Install the reviewed unit from `ops/snoojote-link-guard.service` as a system unit after migrating SQLite. For observation, set `LINK_GUARD_MODE=shadow` in a systemd drop-in. Shadow mode compares message counts after a full window of warm-up and sends no moderation requests. Remove the override to enable enforcement, restart the guard, and verify a fresh `data/link-guard.ready` and the `Link guard ready` entry in its journal. As the deploy account, write the deployed SHA to `.git/snoojote-link-guard-ref` and create `.git/snoojote-link-guard-enabled` only once the enforcing guard is ready.
+
+For code releases the deployer verifies the guard heartbeat before stopping the main bot. The guard keeps its Gateway session during the cutover. After the main bot logs in and registers commands, the deployer requests the new guard revision and waits for its heartbeat. The main bot serves during that rotation. A failed primary startup rolls back while the guard is still serving. If only guard rotation fails, the deployment reports failure and keeps the healthy primary online. Inspect the guard journal, restore the service, then verify a fresh heartbeat matching the deployed SHA. Both processes depend on the same VPS and database.
+
 ### First staff replies after downtime
 
 On startup the bot reads open, eligible ticket channels in chronological pages until it finds the first surviving staff reply or reaches the startup cutoff. It uses the Discord message timestamp and excludes bots and the requester. A concurrent live reply can be superseded by an earlier recovered message without duplicating the response-time sample. Closed tickets and competing initial-wait outcomes are preserved. Historical role assignments and deleted messages cannot be reconstructed. A failed channel read is logged with its ticket ID; check View Channel and Read Message History permissions.

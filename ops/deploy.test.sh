@@ -48,13 +48,19 @@ case "$name" in
         backup=${backup#\'}
         backup=${backup%\'}
         : > "$backup" ;;
-    sleep) : ;;
+    sleep)
+        if [[ "$SCENARIO" == guard_success || "$SCENARIO" == guard_startup ]]; then
+            touch -d '1 second hence' "$FIXTURE/app/data/link-guard.ready"
+        fi
+        if [[ "$SCENARIO" == guard_success && -f "$FIXTURE/app/.git/snoojote-link-guard-ref" ]]; then
+            cp "$FIXTURE/app/.git/snoojote-link-guard-ref" "$FIXTURE/app/data/link-guard.ready"
+        fi ;;
 esac
 MOCK
 chmod +x "$fixture/bin/mock"
 for command in git sudo bun sqlite3 sleep; do ln -s mock "$fixture/bin/$command"; done
 
-for scenario in success docs dirty schema install startup commands; do
+for scenario in success docs dirty schema install startup commands guard_offline guard_success guard_startup; do
     export SCENARIO=$scenario
     mkdir -p "$fixture/app/.git" "$fixture/app/config" "$fixture/app/data" "$fixture/app/logs"
     mkdir -p "$fixture/app/node_modules"
@@ -65,19 +71,28 @@ for scenario in success docs dirty schema install startup commands; do
     echo "$OLD_SHA" > "$fixture/revision"
     echo running > "$fixture/service"
     : > "$fixture/calls"
+    if [[ "$scenario" == guard_* ]]; then
+        touch "$fixture/app/.git/snoojote-link-guard-enabled"
+        echo "$OLD_SHA" > "$fixture/app/data/link-guard.ready"
+        if [[ "$scenario" == guard_offline ]]; then touch -d '2 minutes ago' "$fixture/app/data/link-guard.ready"; fi
+    fi
     result=0
     bash "$fixture/deploy.sh" "$NEW_SHA" > "$fixture/output" 2>&1 || result=$?
     if [[ "$scenario" == docs ]]; then
         [[ "$result" == 0 && $(cat "$fixture/revision") == "$NEW_SHA" ]]
         if grep -Eq 'systemctl stop|bun install|bun run deploy' "$fixture/calls"; then exit 1; fi
-    elif [[ "$scenario" == success ]]; then
+    elif [[ "$scenario" == guard_startup ]]; then
+        [[ "$result" != 0 && $(cat "$fixture/revision") == "$NEW_SHA" ]]
+        grep -q 'Primary remains online' "$fixture/output"
+        [[ $(grep -c 'systemctl stop' "$fixture/calls") == 1 ]]
+    elif [[ "$scenario" == success || "$scenario" == guard_success ]]; then
         [[ -f "$fixture/app/node_modules/prepared" && ! -e "$fixture/app/node_modules/original" ]]
         [[ "$result" == 0 && $(cat "$fixture/revision") == "$NEW_SHA" ]]
         grep -q "Deployed $NEW_SHA" "$fixture/output"
     else
         [[ "$result" != 0 && $(cat "$fixture/revision") == "$OLD_SHA" ]]
         [[ -f "$fixture/app/node_modules/original" && ! -e "$fixture/app/node_modules/prepared" ]]
-        if [[ "$scenario" == dirty || "$scenario" == schema || "$scenario" == install ]]; then
+        if [[ "$scenario" == dirty || "$scenario" == schema || "$scenario" == install || "$scenario" == guard_offline ]]; then
             if grep -q 'systemctl stop' "$fixture/calls"; then exit 1; fi
         else
             grep -q 'Previous code restored' "$fixture/output"

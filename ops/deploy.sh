@@ -74,6 +74,31 @@ log_offset() {
     [[ ! -f logs/combined.log ]] || size=$(stat -c %s logs/combined.log)
     echo "$((size + 1))"
 }
+guard_ready() {
+    [[ "$1" =~ ^[0-9a-f]{40}$ && -f data/link-guard.ready && "$(cat data/link-guard.ready)" == "$1" ]] &&
+        (( $(date +%s) - $(stat -c %Y data/link-guard.ready) < 12 ))
+}
+await_guard_pulse() {
+    local initial
+    initial=$(stat -c %Y data/link-guard.ready) || return 1
+    for ((attempt=0; attempt<12; attempt++)); do
+        if [[ $(stat -c %Y data/link-guard.ready) -gt $initial ]] &&
+            guard_ready "$(cat data/link-guard.ready)"; then return 0; fi
+        sleep 1
+    done
+    return 1
+}
+refresh_guard() {
+    [[ -e .git/snoojote-link-guard-enabled ]] || return 0
+    echo "$1" > .git/snoojote-link-guard-ref.tmp
+    mv .git/snoojote-link-guard-ref.tmp .git/snoojote-link-guard-ref
+    for ((attempt=0; attempt<60; attempt++)); do
+        if guard_ready "$1"; then return 0; fi
+        sleep 1
+    done
+    echo 'Link guard did not become ready on requested revision.'
+    return 1
+}
 rollback() {
     trap - ERR HUP INT TERM
     set +e
@@ -87,7 +112,7 @@ rollback() {
     }
     git checkout --detach "$previous" && restore_modules && {
         offset=$(log_offset)
-        sudo -n systemctl start snoojote && wait_ready "$offset"
+        sudo -n systemctl start snoojote && wait_ready "$offset" && refresh_guard "$previous"
     }
     rollback_status=$?
     if [[ "$rollback_status" != 0 ]]; then
@@ -102,6 +127,10 @@ mkdir -p "$HOME/snoojote-backups"
 backup="$HOME/snoojote-backups/$(date -u +%Y%m%dT%H%M%SZ)-$previous.sqlite"
 sqlite3 data/database.sqlite ".backup '$backup'"
 echo "Database backup: $backup"
+if [[ -e .git/snoojote-link-guard-enabled ]]; then
+    # A docs-only release may have advanced HEAD without restarting either service.
+    await_guard_pulse || { echo 'Link guard offline; keeping primary online.'; exit 1; }
+fi
 trap rollback ERR HUP INT TERM
 sudo -n systemctl stop snoojote
 # Preserve ignored runtime files and untracked server backups; never git clean/reset.
@@ -115,4 +144,9 @@ wait_ready "$offset"
 bun run deploy
 trap - ERR HUP INT TERM
 rm -rf -- "$stage/previous-modules"
+# Primary is serving. Do not take it offline to roll back a failed standby rotation.
+if ! refresh_guard "$sha"; then
+    echo 'Primary remains online; inspect snoojote-link-guard.service before the next rollout.'
+    exit 1
+fi
 echo "Deployed $sha"

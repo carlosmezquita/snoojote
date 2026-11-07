@@ -25,9 +25,12 @@ const client = new Client({
     makeCache: Options.cacheWithLimits({ ...Options.DefaultMakeCacheSettings, MessageManager: 0 }),
 });
 function heartbeat() {
-    if (!client.isReady()) return;
-    writeFileSync('data/link-guard.ready.tmp', revision + '\n', { mode: 0o600 });
-    renameSync('data/link-guard.ready.tmp', 'data/link-guard.ready');
+    if (!client.isReady() || !config.guildId || !client.guilds.cache.get(config.guildId)?.available)
+        return;
+    if (!shadow) {
+        writeFileSync('data/link-guard.ready.tmp', revision + '\n', { mode: 0o600 });
+        renameSync('data/link-guard.ready.tmp', 'data/link-guard.ready');
+    }
     for (const [key, value] of windows) if (Date.now() - value.start > 60_000) windows.delete(key);
     for (const [id, time] of seen) if (Date.now() - time > 60_000) seen.delete(id);
     // The deployer publishes the revision only after primary login and registration.
