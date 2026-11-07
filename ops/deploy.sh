@@ -18,13 +18,13 @@ command -v sqlite3 >/dev/null
 sudo -n systemctl is-active --quiet snoojote
 
 # This installation predates migration journaling. Never blindly replay migrations
-# or force a schema push over production data. See docs/deployment.md.
+# or force a schema push over production data. See docs/OPERATIONS.md.
 schema_ref=$previous
 if [[ -f .git/snoojote-schema-ref ]]; then
     schema_ref=$(cat .git/snoojote-schema-ref)
 fi
 if ! git diff --quiet "$schema_ref" "$sha" -- src/database/schema.ts drizzle; then
-    echo 'Database changes need a reviewed migration first; see docs/deployment.md.'
+    echo 'Database changes need a reviewed migration first; see docs/OPERATIONS.md.'
     exit 1
 fi
 
