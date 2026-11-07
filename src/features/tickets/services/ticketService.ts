@@ -99,6 +99,7 @@ export class TicketService {
                     channelId: `pending:${randomUUID()}`,
                     guildId: guild.id,
                     userId: user.id,
+                    requesterMembershipSince: guild.members?.cache?.get(user.id)?.joinedTimestamp,
                     optionId: option.id,
                     status: 'creating',
                 })

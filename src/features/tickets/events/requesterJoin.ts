@@ -4,5 +4,6 @@ import { recordRequesterAvailability } from '../services/ticketWaitLifecycle.js'
 export const name = Events.GuildMemberAdd;
 export const once = false;
 export const execute = (member: GuildMember) => {
-    recordRequesterAvailability(member.guild.id, member.id, true);
+    if (member.joinedTimestamp != null)
+        recordRequesterAvailability(member.guild.id, member.id, true, member.joinedTimestamp);
 };

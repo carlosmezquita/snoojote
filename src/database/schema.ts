@@ -36,6 +36,8 @@ export const tickets = sqliteTable(
         }),
         waitEndedAt: integer('wait_ended_at', { mode: 'timestamp' }),
         // Current observed membership state, independent of the initial wait outcome.
+        // Discord membership join time (milliseconds), used to order both Gateway streams.
+        requesterMembershipSince: integer('requester_membership_since'),
         requesterUnavailableAt: integer('requester_unavailable_at', { mode: 'timestamp' }),
         closedAt: integer('closed_at', { mode: 'timestamp' }),
         closedBy: text('closed_by'),

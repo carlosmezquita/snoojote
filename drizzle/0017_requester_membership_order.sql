@@ -1,0 +1,1 @@
+ALTER TABLE `tickets` ADD `requester_membership_since` integer;

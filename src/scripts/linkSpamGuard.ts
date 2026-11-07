@@ -1,10 +1,12 @@
+import { execute as requesterJoin } from '../features/tickets/events/requesterJoin.js';
+import { execute as requesterLeave } from '../features/tickets/events/requesterLeave.js';
 import 'dotenv/config';
 import voiceUpdates from '../features/economy/events/voiceStateUpdate.js';
 import { execute as startVoice } from '../features/economy/events/voiceReady.js';
 import { quarantineJoin } from '../features/moderation/services/standbyQuarantine.js';
 import { ensureSuspectLock } from '../features/moderation/services/suspectLock.js';
 import rewards from '../features/economy/events/messageCreate.js';
-import { Client, Events, GatewayIntentBits, Options } from 'discord.js';
+import { Client, Events, GatewayIntentBits, Partials, Options } from 'discord.js';
 import { readFileSync, writeFileSync, renameSync } from 'node:fs';
 import { execFileSync } from 'node:child_process';
 import { config } from '../config.js';
@@ -21,6 +23,7 @@ const started = Date.now();
 const windows = new Map<string, { start: number; count: number }>();
 const seen = new Map<string, number>();
 const client = new Client({
+    partials: [Partials.GuildMember],
     intents: [
         GatewayIntentBits.Guilds,
         GatewayIntentBits.GuildMembers,
@@ -60,8 +63,19 @@ client.on(Events.VoiceStateUpdate, (oldState, newState) => {
         .execute(oldState, newState)
         .catch((error) => logger.error('Standby voice transition failed', { error }));
 });
+client.on(Events.GuildMemberRemove, (member) => {
+    if (shadow || member.guild.id !== config.guildId) return;
+    void requesterLeave(member).catch((error) =>
+        logger.error('Standby requester leave failed', { error }),
+    );
+});
 client.on(Events.GuildMemberAdd, (member) => {
     if (shadow || member.guild.id !== config.guildId) return;
+    try {
+        requesterJoin(member);
+    } catch (error) {
+        logger.error('Standby requester join failed', { error });
+    }
     void quarantineJoin(member).catch((error) =>
         logger.error('Standby join quarantine failed', { userId: member.id, error }),
     );
