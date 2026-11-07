@@ -50,7 +50,7 @@ case "$name" in
         : > "$backup" ;;
     sleep)
         if [[ "$SCENARIO" == guard_success || "$SCENARIO" == guard_startup ]]; then
-            touch -d '1 second hence' "$FIXTURE/app/data/link-guard.ready"
+            touch "$FIXTURE/app/data/link-guard.ready"
         fi
         if [[ "$SCENARIO" == guard_success && -f "$FIXTURE/app/.git/snoojote-link-guard-ref" ]]; then
             cp "$FIXTURE/app/.git/snoojote-link-guard-ref" "$FIXTURE/app/data/link-guard.ready"
@@ -74,7 +74,7 @@ for scenario in success docs dirty schema install startup commands guard_offline
     if [[ "$scenario" == guard_* ]]; then
         touch "$fixture/app/.git/snoojote-link-guard-enabled"
         echo "$OLD_SHA" > "$fixture/app/data/link-guard.ready"
-        if [[ "$scenario" == guard_offline ]]; then touch -d '2 minutes ago' "$fixture/app/data/link-guard.ready"; fi
+        touch -t 200001010000 "$fixture/app/data/link-guard.ready"
     fi
     result=0
     bash "$fixture/deploy.sh" "$NEW_SHA" > "$fixture/output" 2>&1 || result=$?
