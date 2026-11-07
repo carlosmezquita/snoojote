@@ -3,7 +3,8 @@ import { asc, desc, eq, and, count, sql } from 'drizzle-orm';
 import db from '../../../database/db.js';
 import { shopItems, streaks, userInventory, users } from '../../../database/schema.js';
 import { config } from '../../../config.js';
-import { type DiscordBot } from '../../../core/client.js';
+import type { Client } from 'discord.js';
+import logger from '../../../utils/logger.js';
 import {
     getNewMilestones,
     getSpainDateKey,
@@ -16,8 +17,11 @@ const BOT_CHANNEL_ID = config.channels.bot;
 const STREAK_FREEZE_VALUE = 'STREAK_FREEZE';
 
 export class StreakService {
-    async handleStreak(message: Message, client: DiscordBot) {
-        const result = this.recordCheckIn(message.author.id);
+    async notifyCheckIn(
+        message: Message,
+        client: Client,
+        result: ReturnType<StreakService['recordCheckIn']>,
+    ) {
         if (!result) return;
         const content = result.isNew
             ? `¡Hola ${message.author.toString()}! Has empezado tu primera racha.`
@@ -33,7 +37,7 @@ export class StreakService {
         ]);
         for (const outcome of results)
             if (outcome.status === 'rejected') {
-                client.logger.warn('Streak recorded but notification failed', {
+                logger.warn('Streak recorded but notification failed', {
                     userId: message.author.id,
                     error: outcome.reason,
                 });
@@ -128,7 +132,7 @@ export class StreakService {
         return lines.join('\n');
     }
 
-    private async sendBotMessage(client: DiscordBot, content: string, userId: string) {
+    private async sendBotMessage(client: Client, content: string, userId: string) {
         const botChannel = client.channels.cache.get(BOT_CHANNEL_ID) as TextChannel;
         if (botChannel) {
             await botChannel.send({ content, allowedMentions: { parse: [], users: [userId] } });

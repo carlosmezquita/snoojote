@@ -1,4 +1,5 @@
 import 'dotenv/config';
+import rewards from '../features/economy/events/messageCreate.js';
 import { Client, Events, GatewayIntentBits, Options } from 'discord.js';
 import { readFileSync, writeFileSync, renameSync } from 'node:fs';
 import { execFileSync } from 'node:child_process';
@@ -48,7 +49,14 @@ function heartbeat() {
         process.exit(0);
 }
 client.on(Events.MessageCreate, (message) => {
-    if (message.guildId !== config.guildId || !eligible(message)) return;
+    if (message.guildId !== config.guildId) return;
+    if (!shadow)
+        void rewards
+            .execute(message)
+            .catch((error) =>
+                logger.error('Standby message rewards failed', { messageId: message.id, error }),
+            );
+    if (!eligible(message)) return;
     if (shadow) {
         if (seen.has(message.id)) return;
         seen.set(message.id, message.createdTimestamp);

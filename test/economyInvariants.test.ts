@@ -137,6 +137,8 @@ describe('economy transactions', () => {
     test('a simultaneous message burst consumes one reward cooldown', async () => {
         const id = user();
         const message = {
+            id: randomUUID(),
+            createdAt: new Date(),
             author: { id, bot: false },
             guild: { id: 'guild' },
             guildId: 'guild',
@@ -146,7 +148,9 @@ describe('economy transactions', () => {
             reply: async () => {},
         };
         await Promise.all(
-            Array.from({ length: 100 }, () => messageRewards.execute(message as never)),
+            Array.from({ length: 100 }, () =>
+                messageRewards.execute({ ...message, id: randomUUID() } as never),
+            ),
         );
         const balance = await economy.getBalance(id);
         expect(balance).toBeGreaterThan(100);

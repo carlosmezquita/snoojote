@@ -296,6 +296,10 @@ Install the reviewed unit from `ops/snoojote-link-guard.service` as a system uni
 
 For code releases the deployer verifies the guard heartbeat before stopping the main bot. The guard keeps its Gateway session during the cutover. After the main bot logs in and registers commands, the deployer requests the new guard revision and waits for its heartbeat. The main bot serves during that rotation. A failed primary startup rolls back while the guard is still serving. If only guard rotation fails, the deployment reports failure and keeps the healthy primary online. Inspect the guard journal, restore the service, then verify a fresh heartbeat matching the deployed SHA. Both processes depend on the same VPS and database.
 
+### Message rewards and streaks during deployments
+
+The enforcing standby also consumes member messages for rewards and streaks. Migration 0015 records a unique receipt per eligible message. Its transaction includes cooldown consumption, capped currency, daily quest progress, streak check-in, any freeze consumption and milestone bonus. Both listeners use the Discord creation time for the Madrid calendar day. Receipts retain IDs and timestamps without message bodies. Reactions, quest replies and streak announcements are best effort after commit. A message missed by both Gateway sessions cannot be recovered from a receipt.
+
 ### First staff replies after downtime
 
 On startup the bot reads open, eligible ticket channels in chronological pages until it finds the first surviving staff reply or reaches the startup cutoff. It uses the Discord message timestamp and excludes bots and the requester. A concurrent live reply can be superseded by an earlier recovered message without duplicating the response-time sample. Closed tickets and competing initial-wait outcomes are preserved. Historical role assignments and deleted messages cannot be reconstructed. A failed channel read is logged with its ticket ID; check View Channel and Read Message History permissions.

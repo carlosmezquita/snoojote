@@ -274,3 +274,19 @@ export const linkSpamEvents = sqliteTable(
         pending: index('link_spam_pending').on(t.done, t.observedAt),
     }),
 );
+
+export const messageRewardReceipts = sqliteTable(
+    'message_reward_receipts',
+    {
+        messageId: text('message_id').primaryKey(),
+        guildId: text('guild_id').notNull(),
+        userId: text('user_id').notNull(),
+        sentAt: integer('sent_at').notNull(),
+        rewardEligible: integer('reward_eligible', { mode: 'boolean' }).notNull(),
+    },
+    (t) => ({
+        cooldown: index('message_reward_cooldown')
+            .on(t.guildId, t.userId, t.sentAt)
+            .where(sql`${t.rewardEligible} = 1`),
+    }),
+);
