@@ -91,7 +91,7 @@ jobs:
                       `Dependencies: ${env.DEPENDENCIES_RESULT}`,
                       `VPS: ${env.VPS_RESULT}`,
                       env.VPS_FINDINGS?.slice(0, 1000),
-                      `Details: ${env.RUN_URL}`,
+                      `Details: <${env.RUN_URL}>`,
                       'Reboots remain manual. These checks do not restart the bot.',
                     ].filter(Boolean).join('\n');
                     const response = await fetch(url, {
