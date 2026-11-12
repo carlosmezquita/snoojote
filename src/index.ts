@@ -20,7 +20,7 @@ async function shutdown(code: number) {
     const deadline = setTimeout(() => process.exit(code || 1), 130000);
     deadline.unref();
     try {
-        for (const task of cron.getTasks().values()) task.stop();
+        await Promise.all(Array.from(cron.getTasks().values(), (task) => task.stop()));
         if (code === 0) await drainBeforeExit();
         await client.destroy();
         sqlite.close();
