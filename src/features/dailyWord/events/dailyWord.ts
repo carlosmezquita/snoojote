@@ -41,7 +41,6 @@ export const execute = (client: DiscordBot) => {
             await prepareDailyWord(client, 'scheduled-prefetch');
         },
         {
-            scheduled: true,
             timezone: 'Europe/Madrid',
         },
     );
@@ -53,7 +52,6 @@ export const execute = (client: DiscordBot) => {
             await postPreparedDailyWord(client, 'scheduled-post');
         },
         {
-            scheduled: true,
             timezone: 'Europe/Madrid',
         },
     );
