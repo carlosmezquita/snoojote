@@ -29,11 +29,11 @@ export class StreakService {
             : this.buildStreakMessage(
                   message,
                   result.streak,
-                  result.usedFreeze,
+                  result.remainingFreezes,
                   result.newMilestones,
               );
         const results = await Promise.allSettled([
-            message.react('🔥'),
+            message.react(result.remainingFreezes === null ? '🔥' : '🧊'),
             this.sendBotMessage(client, content, message.author.id),
         ]);
         for (const outcome of results)
@@ -57,7 +57,7 @@ export class StreakService {
                 )
                     return null;
                 const claimed = this.parseClaimedMilestones(previous?.claimedMilestones);
-                let usedFreeze = false;
+                let remainingFreezes: number | null = null;
                 let streak = 1;
                 if (previous) {
                     if (
@@ -81,7 +81,7 @@ export class StreakService {
                             .get();
                         if (slot) {
                             tx.delete(userInventory).where(eq(userInventory.id, slot.id)).run();
-                            usedFreeze = true;
+                            remainingFreezes = this.countStreakFreezes(userId, tx);
                             streak = previous.streak + 1;
                         }
                     }
@@ -109,7 +109,7 @@ export class StreakService {
                         set: { points: sql`${users.points} + ${reward}` },
                     })
                     .run();
-                return { isNew: !previous, streak, usedFreeze, newMilestones };
+                return { isNew: !previous, streak, remainingFreezes, newMilestones };
             },
             { behavior: 'immediate' },
         );
@@ -118,13 +118,22 @@ export class StreakService {
     private buildStreakMessage(
         message: Message,
         streak: number,
-        usedFreeze: boolean,
+        remainingFreezes: number | null,
         newMilestones: number[],
     ) {
         const lines = [`La racha actual de ${message.author.toString()} es de ${streak} días.`];
 
-        if (usedFreeze) {
-            lines.push('🧊 Se consumió un Seguro de Racha para protegerla.');
+        if (remainingFreezes !== null) {
+            lines.push('🧊 Se usó un seguro para proteger tu racha.');
+            if (remainingFreezes === 0) {
+                lines.push('No te quedan seguros. Puedes comprar otro con `/tienda`.');
+            } else {
+                lines.push(
+                    remainingFreezes === 1
+                        ? 'Te queda **1 seguro**.'
+                        : `Te quedan **${remainingFreezes} seguros**.`,
+                );
+            }
         }
 
         for (const milestone of newMilestones) {
@@ -155,20 +164,17 @@ export class StreakService {
     }
 
     async getStreakFreezeCount(userId: string): Promise<number> {
-        const freezeItem = await db
-            .select()
-            .from(shopItems)
-            .where(eq(shopItems.value, STREAK_FREEZE_VALUE))
-            .get();
+        return this.countStreakFreezes(userId, db);
+    }
 
-        if (!freezeItem) return 0;
-
+    private countStreakFreezes(userId: string, query: Pick<typeof db, 'select'>): number {
         return (
-            db
+            query
                 .select({ value: count() })
                 .from(userInventory)
+                .innerJoin(shopItems, eq(shopItems.id, userInventory.itemId))
                 .where(
-                    and(eq(userInventory.userId, userId), eq(userInventory.itemId, freezeItem.id)),
+                    and(eq(userInventory.userId, userId), eq(shopItems.value, STREAK_FREEZE_VALUE)),
                 )
                 .get()?.value ?? 0
         );
