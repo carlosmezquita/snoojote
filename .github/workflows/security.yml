@@ -60,26 +60,57 @@ jobs:
                   } >> "$GITHUB_OUTPUT"
                   exit "$status"
     alerts:
-        if: >-
-            always() && github.ref == 'refs/heads/main' &&
-            (needs.dependencies.result != 'success' || needs.vps.result != 'success')
+        if: ${{ !cancelled() && github.ref == 'refs/heads/main' }}
         needs: [dependencies, vps]
         runs-on: ubuntu-latest
         timeout-minutes: 5
         environment: production
         permissions: {}
         steps:
-            - name: Send security alert to Discord
+            - name: Restore security alert state
+              uses: actions/cache/restore@cdf6c1fa76f9f475f3d7449005a359c84ca0f306 # v5.0.3
+              continue-on-error: true
+              with:
+                  path: ${{ runner.temp }}/snoojote-security-alert
+                  key: security-alert-v1-${{ github.run_id }}-${{ github.run_attempt }}
+                  restore-keys: security-alert-v1-
+            - name: Send new security findings to Discord
               env:
                   DISCORD_WEBHOOK: ${{ secrets.DISCORD_SECURITY_WEBHOOK }}
                   DEPENDENCIES_RESULT: ${{ needs.dependencies.result }}
                   VPS_RESULT: ${{ needs.vps.result }}
                   VPS_FINDINGS: ${{ needs.vps.outputs.findings }}
+                  ALERT_STATE: ${{ runner.temp }}/snoojote-security-alert/fingerprint
                   RUN_URL: ${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}
               run: |
                   node --input-type=module <<'JS'
+                  import { createHash } from 'node:crypto';
+                  import { mkdir, readFile, writeFile } from 'node:fs/promises';
+                  import { dirname } from 'node:path';
+
                   try {
                     const env = process.env;
+                    const findings = [...new Set((env.VPS_FINDINGS ?? '').split(/\r?\n/)
+                      .filter(line => line.startsWith('ATTENTION:')).map(line => line.trim()))].sort();
+                    const healthy = env.DEPENDENCIES_RESULT === 'success' && env.VPS_RESULT === 'success';
+                    // Unclassified failures remain visible because their cause may have changed.
+                    const fingerprint = env.DEPENDENCIES_RESULT === 'success' &&
+                      env.VPS_RESULT === 'failure' && findings.length
+                      ? createHash('sha256').update(JSON.stringify(findings)).digest('hex')
+                      : '';
+                    const previous = await readFile(env.ALERT_STATE, 'utf8').catch(error => {
+                      if (error.code !== 'ENOENT') throw error;
+                      return '';
+                    });
+                    const saveState = async value => {
+                      await mkdir(dirname(env.ALERT_STATE), { recursive: true });
+                      await writeFile(env.ALERT_STATE, value, { mode: 0o600 });
+                    };
+                    if (healthy || (fingerprint && fingerprint === previous)) {
+                      await saveState(healthy ? '' : fingerprint);
+                      console.log(healthy ? 'Security checks passed.' : 'VPS findings unchanged. Discord alert suppressed.');
+                      process.exit(0);
+                    }
                     const url = new URL(env.DISCORD_WEBHOOK);
                     if (url.protocol !== 'https:' || url.hostname !== 'discord.com' ||
                         !/^\/api\/webhooks\/\d+\/[\w-]+$/.test(url.pathname)) {
@@ -101,9 +132,15 @@ jobs:
                       signal: AbortSignal.timeout(15000),
                     });
                     if (!response.ok) throw new Error('Webhook delivery failed');
+                    await saveState(fingerprint);
                     console.log('Security alert delivered to the Discord alerts channel.');
                   } catch {
                     console.error('Discord alert delivery failed. Check the production webhook secret and Discord availability.');
                     process.exitCode = 1;
                   }
                   JS
+            - name: Save security alert state
+              uses: actions/cache/save@cdf6c1fa76f9f475f3d7449005a359c84ca0f306 # v5.0.3
+              with:
+                  path: ${{ runner.temp }}/snoojote-security-alert
+                  key: security-alert-v1-${{ github.run_id }}-${{ github.run_attempt }}

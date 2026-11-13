@@ -125,7 +125,10 @@ These checks are a baseline, not a complete vulnerability or intrusion scan.
 Failed checks send an alert to the Discord channel configured as `channels.alerts`
 in the bot's runtime configuration. The message includes component results, VPS
 findings when available, and a link to the workflow run. Passing checks are silent.
-An unresolved finding produces another alert on the next daily check.
+Identical VPS findings are grouped while dependency checks pass. Discord receives
+another alert when findings change or recur after a passing check. Dependency
+failures and VPS failures without a finding still alert on each run. The workflow
+caches only a fingerprint. If GitHub evicts the cache, the next failure alerts again.
 
 GitHub sends these alerts directly through a channel-scoped Discord webhook,
 even if the bot or VPS is offline. The webhook URL is stored only in the `production`
