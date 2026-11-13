@@ -292,9 +292,16 @@ describe('atomic streak check-ins', () => {
             ])
             .run();
         const service = new StreakService();
-        await Promise.all(Array.from({ length: 30 }, async () => service.recordCheckIn(id, now)));
+        const results = await Promise.all(
+            Array.from({ length: 30 }, async () => service.recordCheckIn(id, now)),
+        );
+        expect(results.filter(Boolean)).toHaveLength(1);
+        expect(results.find(Boolean)?.remainingFreezes).toBe(1);
         expect(await service.getStreakFreezeCount(id)).toBe(1);
         expect((await service.getUserStreak(id))!.streak).toBe(4);
+        expect(service.recordCheckIn(id, new Date('2026-05-25T12:00:00Z'))?.remainingFreezes).toBe(
+            0,
+        );
     });
 
     test('failed milestone credit rolls back the streak and can be retried', async () => {
