@@ -9,6 +9,7 @@ import {
     shopItems,
     userInventory,
     economyDailyEarnings,
+    messageRewardReceipts,
 } from '../src/database/schema.js';
 import { type DiscordBot } from '../src/core/client.js';
 import { EconomyService } from '../src/features/economy/services/economyService.js';
@@ -19,7 +20,7 @@ import {
     MILESTONE_BONUSES,
     getDailyReward,
 } from '../src/features/streaks/services/streakRules.js';
-import messageRewards from '../src/features/economy/events/messageCreate.js';
+import messageRewards, { applyMessage } from '../src/features/economy/events/messageCreate.js';
 import { config } from '../src/config.js';
 
 const identifiers: string[] = [];
@@ -35,6 +36,7 @@ function user() {
 afterEach(() => {
     db.run(sql`DROP TRIGGER IF EXISTS fail_streak_credit`);
     for (const id of identifiers.splice(0)) {
+        db.delete(messageRewardReceipts).where(eq(messageRewardReceipts.userId, id)).run();
         db.delete(economyDailyEarnings).where(eq(economyDailyEarnings.userId, id)).run();
         db.delete(userInventory).where(eq(userInventory.userId, id)).run();
         db.delete(streaks).where(eq(streaks.userId, id)).run();
@@ -159,6 +161,80 @@ describe('economy transactions', () => {
 });
 
 describe('atomic streak check-ins', () => {
+    test('the message transaction checks in only for the Spaincraft keyword or accepted typos in the dedicated streaks channel', () => {
+        const id = user();
+        const message = {
+            createdAt: new Date('2026-11-13T13:00:00Z'),
+            author: { id, bot: false },
+            guildId: 'guild',
+            channelId: config.channels.streaks,
+            client,
+        };
+        for (const override of [
+            { content: 'any sufficiently long message' },
+            { content: 'snoojote' },
+            { content: 'spaincrafter' },
+            { content: 'myspaincraft' },
+            { content: 'spaincraft', channelId: config.channels.main },
+            { content: 'éspaincraft' },
+            { content: 'spaincraft', author: { id, bot: true } },
+            { content: 'spaincraft', guildId: null },
+        ]) {
+            expect(
+                applyMessage({ ...message, id: randomUUID(), ...override } as never)?.streak,
+            ).toBeFalsy();
+        }
+        const checkIn = { ...message, id: randomUUID(), content: '¡Hola, SPAINCRAFT!' } as never;
+        expect(applyMessage(checkIn)?.streak?.streak).toBe(1);
+        expect(applyMessage(checkIn)).toBeUndefined();
+        for (const content of [
+            'Sapincraft',
+            'spaincarft',
+            'spaincrfat',
+            'spaincratf',
+            'spaincraf',
+        ]) {
+            expect(
+                applyMessage({
+                    ...message,
+                    id: randomUUID(),
+                    content,
+                    author: { id: user(), bot: false },
+                } as never)?.streak?.streak,
+            ).toBe(1);
+        }
+    });
+
+    test('the grace period preserves a streak across a missed day until it expires', () => {
+        const service = new StreakService();
+        const onTime = user();
+        const late = user();
+        const lastCheckIn = new Date('2026-11-12T06:00:00Z');
+        service.recordCheckIn(onTime, lastCheckIn);
+        service.recordCheckIn(late, lastCheckIn);
+        expect(service.recordCheckIn(onTime, new Date('2026-11-13T18:00:00Z'))?.streak).toBe(2);
+        expect(service.recordCheckIn(late, new Date('2026-11-13T18:00:01Z'))?.streak).toBe(1);
+    });
+
+    test('check-ins cross 14:00, not midnight, including pre-change stored dates', async () => {
+        const id = user();
+        const service = new StreakService();
+        // A midnight-based row from before deployment belongs to the previous streak day.
+        db.insert(streaks)
+            .values({
+                userId: id,
+                streak: 2,
+                lastStreakDate: '2026-10-29',
+                lastStreakAt: new Date('2026-10-29T09:00:00Z'),
+            })
+            .run();
+        expect(service.recordCheckIn(id, new Date('2026-10-29T12:59:59Z'))).toBeNull();
+        expect(service.recordCheckIn(id, new Date('2026-10-29T13:00:00Z'))?.streak).toBe(3);
+        expect(service.recordCheckIn(id, new Date('2026-10-30T00:00:00Z'))).toBeNull();
+        expect(service.recordCheckIn(id, new Date('2026-10-30T12:59:59Z'))).toBeNull();
+        expect(service.recordCheckIn(id, new Date('2026-10-30T13:00:00Z'))?.streak).toBe(4);
+    });
+
     const milestone = Object.keys(MILESTONE_BONUSES)
         .map(Number)
         .filter((day) => day > 1)

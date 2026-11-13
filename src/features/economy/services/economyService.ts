@@ -6,6 +6,8 @@ import type { Client } from 'discord.js';
 import {
     getDailyReward,
     getSpainDateKey,
+    getStreakDateKey,
+    getLastStreakDateKey,
     isConsecutiveDay,
     isWithinGracePeriod,
 } from '../../streaks/services/streakRules.js';
@@ -270,9 +272,10 @@ export class EconomyService {
 }
 function activeStreak(streak: typeof streaks.$inferSelect | undefined, now: Date): number {
     if (!streak) return 0;
-    const today = getSpainDateKey(now);
-    return streak.lastStreakDate === today ||
-        isConsecutiveDay(streak.lastStreakDate, today) ||
+    const today = getStreakDateKey(now);
+    const previousDay = getLastStreakDateKey(streak);
+    return previousDay === today ||
+        isConsecutiveDay(previousDay, today) ||
         isWithinGracePeriod(streak.lastStreakAt, now)
         ? streak.streak
         : 0;

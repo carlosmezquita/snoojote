@@ -27,6 +27,37 @@ export function getSpainDateKey(date: Date): string {
     return `${parts.year}-${parts.month}-${parts.day}`;
 }
 
+const streakFormatter = new Intl.DateTimeFormat('en-CA', {
+    timeZone: STREAK_TIME_ZONE,
+    year: 'numeric',
+    month: '2-digit',
+    day: '2-digit',
+    hour: '2-digit',
+    hourCycle: 'h23',
+});
+
+// A streak day runs from 14:00 Madrid time until 13:59:59 the next day.
+// Compare local wall-clock hours so DST changes never move the boundary.
+export function getStreakDateKey(date: Date): string {
+    const parts = Object.fromEntries(
+        streakFormatter
+            .formatToParts(date)
+            .filter((part) => part.type !== 'literal')
+            .map((part) => [part.type, part.value]),
+    );
+    const day = new Date(`${parts.year}-${parts.month}-${parts.day}T00:00:00Z`);
+    if (Number(parts.hour) < 14) day.setUTCDate(day.getUTCDate() - 1);
+    return day.toISOString().slice(0, 10);
+}
+
+// Prefer the timestamp to reinterpret check-ins saved under the old midnight boundary.
+export function getLastStreakDateKey(streak: {
+    lastStreakAt: Date | null;
+    lastStreakDate: string | null;
+}): string | null {
+    return streak.lastStreakAt ? getStreakDateKey(streak.lastStreakAt) : streak.lastStreakDate;
+}
+
 export function isConsecutiveDay(
     lastDateKey: string | null | undefined,
     todayDateKey: string,
