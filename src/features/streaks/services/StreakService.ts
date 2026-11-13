@@ -25,7 +25,7 @@ export class StreakService {
     ) {
         if (!result) return;
         const content = result.isNew
-            ? `¡Hola ${message.author.toString()}! Has empezado tu primera racha.`
+            ? `¡Hola ${message.author.toString()}! Has empezado tu primera racha. Para mantenerla, escribe **spaincraft** cada día en el canal de rachas.`
             : this.buildStreakMessage(
                   message,
                   result.streak,

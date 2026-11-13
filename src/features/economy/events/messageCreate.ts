@@ -5,12 +5,15 @@ import quests, { QuestType } from '../services/questService.js';
 import streaks from '../../streaks/services/StreakService.js';
 import { config } from '../../../config.js';
 
+// Match complete words, including common missing letters, swaps and "kraft".
+const STREAK_TRIGGER =
+    /(?<![\p{L}\p{M}\p{N}_])(?:spain[ck]raft?|paincraft|saincraft|spincraft|spancraft|spaicraft|spainraft|spaincaft|spaincrft|spaincrat|sapincraft|spaincarft|spaincrfat|spaincratf)(?![\p{L}\p{M}\p{N}_])/iu;
+
 export function applyMessage(message: Message) {
     const content = message.content.trim();
     if (!message.guildId || message.author.bot || !content) return;
     const earns = !quests.isExcludedQuestChannel(message.channelId);
-    const checksIn =
-        config.streaks.channelIds.includes(message.channelId) && /\bsnoojote\b/i.test(content);
+    const checksIn = message.channelId === config.channels.streaks && STREAK_TRIGGER.test(content);
     if (!earns && !checksIn) return;
     const guild = message.guildId;
     const user = message.author.id;

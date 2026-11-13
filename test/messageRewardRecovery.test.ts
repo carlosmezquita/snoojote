@@ -31,14 +31,14 @@ test('a listener dying inside or after the reward transaction leaves exactly one
             const {applyMessage}=await import(${moduleUrl('features/economy/events/messageCreate.ts')});
             const {default:streaks}=await import(${moduleUrl('features/streaks/services/StreakService.ts')});
             const {config}=await import(${moduleUrl('config.ts')});
-            config.streaks.channelIds=['reward-test'];
+            config.channels.streaks='reward-test';
             config.economy.messageRewards.min=config.economy.messageRewards.max=5;
             if(process.env.PHASE==='during') {
                 const record=streaks.recordCheckIn.bind(streaks);
                 streaks.recordCheckIn=(...args)=>{record(...args);process.exit(73);};
             }
             applyMessage({id:'shared',guildId:'guild',channelId:'reward-test',createdAt:new Date(1700000000000),
-                content:'Snoojote',author:{id:'member',bot:false},client:{channels:{cache:{filter:()=>new Map()}}}});
+                content:'Spaincraft',author:{id:'member',bot:false},client:{channels:{cache:{filter:()=>new Map()}}}});
             if(process.env.PHASE==='after') process.exit(74);
         `,
                 ],

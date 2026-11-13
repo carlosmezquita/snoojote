@@ -161,30 +161,48 @@ describe('economy transactions', () => {
 });
 
 describe('atomic streak check-ins', () => {
-    test('the message transaction checks in only for the snoojote keyword in a streak channel', () => {
+    test('the message transaction checks in only for the Spaincraft keyword or accepted typos in the dedicated streaks channel', () => {
         const id = user();
         const message = {
             createdAt: new Date('2026-11-13T13:00:00Z'),
             author: { id, bot: false },
             guildId: 'guild',
-            channelId: config.streaks.channelIds[0],
+            channelId: config.channels.streaks,
             client,
         };
         for (const override of [
             { content: 'any sufficiently long message' },
-            { content: 'spaincraft' },
-            { content: 'snoojotero' },
-            { content: 'snoojote', channelId: 'public-test' },
-            { content: 'snoojote', author: { id, bot: true } },
-            { content: 'snoojote', guildId: null },
+            { content: 'snoojote' },
+            { content: 'spaincrafter' },
+            { content: 'myspaincraft' },
+            { content: 'spaincraft', channelId: config.channels.main },
+            { content: 'éspaincraft' },
+            { content: 'spaincraft', author: { id, bot: true } },
+            { content: 'spaincraft', guildId: null },
         ]) {
             expect(
                 applyMessage({ ...message, id: randomUUID(), ...override } as never)?.streak,
             ).toBeFalsy();
         }
-        const checkIn = { ...message, id: randomUUID(), content: '¡Hola, SNOOJOTE!' } as never;
+        const checkIn = { ...message, id: randomUUID(), content: '¡Hola, SPAINCRAFT!' } as never;
         expect(applyMessage(checkIn)?.streak?.streak).toBe(1);
         expect(applyMessage(checkIn)).toBeUndefined();
+        for (const content of [
+            'Sapincraft',
+            'spaincarft',
+            'spaincrfat',
+            'spaincratf',
+            'spaincraf',
+        ]) {
+            expect(
+                applyMessage({
+                    ...message,
+                    id: randomUUID(),
+                    content,
+                    author: { id: user(), bot: false },
+                } as never)?.streak?.streak,
+            ).toBe(1);
+        }
     });
 
     test('the grace period preserves a streak across a missed day until it expires', () => {
