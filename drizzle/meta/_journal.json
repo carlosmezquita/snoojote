@@ -92,6 +92,48 @@
             "when": 1793054540035,
             "tag": "0012_ticket_wait_outcomes",
             "breakpoints": true
+        },
+        {
+            "idx": 13,
+            "version": "6",
+            "when": 1794061148150,
+            "tag": "0013_verification_recovery",
+            "breakpoints": true
+        },
+        {
+            "idx": 14,
+            "version": "6",
+            "when": 1794062812096,
+            "tag": "0014_link_spam_journal",
+            "breakpoints": true
+        },
+        {
+            "idx": 15,
+            "version": "6",
+            "when": 1794063886460,
+            "tag": "0015_message_reward_receipts",
+            "breakpoints": true
+        },
+        {
+            "idx": 16,
+            "version": "6",
+            "when": 1794064904879,
+            "tag": "0016_durable_voice_sessions",
+            "breakpoints": true
+        },
+        {
+            "idx": 17,
+            "version": "6",
+            "when": 1794066037169,
+            "tag": "0017_requester_membership_order",
+            "breakpoints": true
+        },
+        {
+            "idx": 18,
+            "version": "6",
+            "when": 1794068175133,
+            "tag": "0018_restart_dispatch",
+            "breakpoints": true
         }
     ]
 }

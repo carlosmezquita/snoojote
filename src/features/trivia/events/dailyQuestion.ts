@@ -27,7 +27,6 @@ export const execute = (client: DiscordBot) => {
             await runDailyQuestion(client, 'scheduled');
         },
         {
-            scheduled: true,
             timezone: 'Europe/Madrid',
         },
     );

@@ -1,3 +1,4 @@
+import { serveOnce } from '../../../core/restartDispatch.js';
 import { Events, type Message } from 'discord.js';
 import { type DiscordBot } from '../../../core/client.js';
 import { config } from '../../../config.js';
@@ -137,4 +138,21 @@ export function createAiHandler(createAgent: () => Pick<Agent, 'getResponse'> = 
     };
 }
 
-export default createAiHandler();
+const ai = createAiHandler();
+export default {
+    name: ai.name,
+    once: false,
+    async execute(message: Message, client: DiscordBot) {
+        if (
+            message.author.bot ||
+            !message.guild ||
+            message.channelId !== config.channels.ai ||
+            !message.mentions.has(client.user!)
+        )
+            return;
+        await serveOnce('ai:' + message.id, () => ai.execute(message, client), {
+            resource: 'ai:' + message.guildId + ':' + message.author.id,
+            ai: { cooldownMs: config.ai.cooldownSeconds * 1000, capacity: config.ai.maxConcurrent },
+        });
+    },
+};

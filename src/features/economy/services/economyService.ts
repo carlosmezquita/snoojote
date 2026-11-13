@@ -2,7 +2,7 @@ import db from '../../../database/db.js';
 import { economyDailyEarnings, streaks, users } from '../../../database/schema.js';
 import { eq, sql, desc, and } from 'drizzle-orm';
 import questService, { type QuestData } from './questService.js';
-import { type DiscordBot } from '../../../core/client.js';
+import type { Client } from 'discord.js';
 import {
     getDailyReward,
     getSpainDateKey,
@@ -58,6 +58,16 @@ export class EconomyService {
         dailyCap: number,
         now = new Date(),
     ): Promise<number> {
+        return this.addCappedEarningSync(userId, source, amount, dailyCap, now);
+    }
+
+    addCappedEarningSync(
+        userId: string,
+        source: EconomyEarningSource,
+        amount: number,
+        dailyCap: number,
+        now = new Date(),
+    ): number {
         if (!positiveInteger(amount) || !positiveInteger(dailyCap)) return 0;
         const dateKey = getSpainDateKey(now);
         return db.transaction(
@@ -148,7 +158,11 @@ export class EconomyService {
         );
     }
 
-    async getDailyQuest(userId: string, client: DiscordBot, now = new Date()): Promise<QuestData> {
+    async getDailyQuest(userId: string, client: Client, now = new Date()): Promise<QuestData> {
+        return this.getDailyQuestSync(userId, client, now);
+    }
+
+    getDailyQuestSync(userId: string, client: Client, now = new Date()): QuestData {
         return db.transaction(
             (tx) => {
                 const user = tx.select().from(users).where(eq(users.userId, userId)).get();
@@ -179,6 +193,16 @@ export class EconomyService {
         channelId?: string,
         now = new Date(),
     ): Promise<QuestData | null> {
+        return this.updateQuestProgressSync(userId, type, increment, channelId, now);
+    }
+
+    updateQuestProgressSync(
+        userId: string,
+        type: string,
+        increment: number,
+        channelId?: string,
+        now = new Date(),
+    ): QuestData | null {
         if (!positiveInteger(increment)) return null;
         return db.transaction(
             (tx) => {

@@ -1,3 +1,4 @@
+import { isWorking } from '../../../core/restartDispatch.js';
 import { randomUUID } from 'crypto';
 import { and, eq, sql } from 'drizzle-orm';
 import db, { type AppDatabase } from '../../../database/db.js';
@@ -90,7 +91,8 @@ export class PurchaseService {
     }
 
     async recover(roles: RoleDelivery): Promise<void> {
-        for (const purchase of this.pending()) await this.run(purchase, roles, true);
+        for (const purchase of this.pending())
+            if (!isWorking('buy:' + purchase.userId)) await this.run(purchase, roles, true);
     }
 
     private async run(purchase: Purchase, roles: RoleDelivery, recovering: boolean) {

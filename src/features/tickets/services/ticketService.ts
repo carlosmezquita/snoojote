@@ -1,3 +1,4 @@
+import { isWorking } from '../../../core/restartDispatch.js';
 import {
     ActionRowBuilder,
     AttachmentBuilder,
@@ -99,6 +100,7 @@ export class TicketService {
                     channelId: `pending:${randomUUID()}`,
                     guildId: guild.id,
                     userId: user.id,
+                    requesterMembershipSince: guild.members?.cache?.get(user.id)?.joinedTimestamp,
                     optionId: option.id,
                     status: 'creating',
                 })
@@ -621,7 +623,21 @@ export class TicketService {
             )
             .all();
         for (const ticket of incomplete) {
-            if (!this.creating.has(ticket.id)) await this.cleanupIncompleteTicket(ticket, guild);
+            if (
+                !this.creating.has(ticket.id) &&
+                !isWorking('create-ticket:' + ticket.userId) &&
+                db
+                    .select({ id: tickets.id })
+                    .from(tickets)
+                    .where(
+                        and(
+                            eq(tickets.id, ticket.id),
+                            inArray(tickets.status, ['creating', 'creation_failed']),
+                        ),
+                    )
+                    .get()
+            )
+                await this.cleanupIncompleteTicket(ticket, guild);
         }
     }
 

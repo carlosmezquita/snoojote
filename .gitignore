@@ -39,3 +39,4 @@ yarn-error.log*
 data/
 /src/generated/prisma
 /logs
+.jules/

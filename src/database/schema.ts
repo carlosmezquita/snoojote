@@ -36,6 +36,8 @@ export const tickets = sqliteTable(
         }),
         waitEndedAt: integer('wait_ended_at', { mode: 'timestamp' }),
         // Current observed membership state, independent of the initial wait outcome.
+        // Discord membership join time (milliseconds), used to order both Gateway streams.
+        requesterMembershipSince: integer('requester_membership_since'),
         requesterUnavailableAt: integer('requester_unavailable_at', { mode: 'timestamp' }),
         closedAt: integer('closed_at', { mode: 'timestamp' }),
         closedBy: text('closed_by'),
@@ -237,3 +239,102 @@ export const shopPurchases = sqliteTable(
             .where(sql`${table.status} = 'pending'`),
     }),
 );
+
+export const verificationJournal = sqliteTable('verification_journal', {
+    membership: text('membership').primaryKey(),
+    status: text('status', { enum: ['pending', 'completed'] }).notNull(),
+    challenge: text('challenge'),
+});
+
+export const verificationCheckpoint = sqliteTable('verification_checkpoint', {
+    guildId: text('guild_id').primaryKey(),
+    observedAt: integer('observed_at').notNull(),
+});
+
+export const linkSpamEvents = sqliteTable(
+    'link_spam_events',
+    {
+        messageId: text('message_id').primaryKey(),
+        guildId: text('guild_id').notNull(),
+        userId: text('user_id').notNull(),
+        channelId: text('channel_id').notNull(),
+        observedAt: integer('observed_at').notNull(),
+        windowStart: integer('window_start').notNull(),
+        count: integer('count').notNull(),
+        required: integer('required').notNull(),
+        claimed: integer('claimed').notNull().default(0),
+        finished: integer('finished').notNull().default(0),
+        done: integer('done').notNull().default(0),
+    },
+    (t) => ({
+        memberWindow: index('link_spam_member_window').on(
+            t.guildId,
+            t.userId,
+            t.windowStart,
+            t.count,
+        ),
+        pending: index('link_spam_pending').on(t.done, t.observedAt),
+    }),
+);
+
+export const messageRewardReceipts = sqliteTable(
+    'message_reward_receipts',
+    {
+        messageId: text('message_id').primaryKey(),
+        guildId: text('guild_id').notNull(),
+        userId: text('user_id').notNull(),
+        sentAt: integer('sent_at').notNull(),
+        rewardEligible: integer('reward_eligible', { mode: 'boolean' }).notNull(),
+    },
+    (t) => ({
+        cooldown: index('message_reward_cooldown')
+            .on(t.guildId, t.userId, t.sentAt)
+            .where(sql`${t.rewardEligible} = 1`),
+    }),
+);
+
+export const voiceSessions = sqliteTable(
+    'voice_sessions',
+    {
+        guildId: text('guild_id').notNull(),
+        userId: text('user_id').notNull(),
+        channelId: text('channel_id'),
+        sessionId: text('session_id'),
+        cursor: integer('cursor').notNull(),
+        confirmedAt: integer('confirmed_at').notNull(),
+        revision: integer('revision').notNull(),
+    },
+    (t) => [uniqueIndex('voice_membership').on(t.guildId, t.userId)],
+);
+
+export const gatewayWork = sqliteTable(
+    'gateway_work',
+    {
+        key: text('key').primaryKey(),
+        owner: text('owner').notNull(),
+        resource: text('resource'),
+        started: integer('started').notNull(),
+        finished: integer('finished').notNull().default(0),
+    },
+    (t) => [index('gateway_work_drain').on(t.owner, t.finished)],
+);
+export const gatewayDrain = sqliteTable('gateway_drain', { owner: text('owner').primaryKey() });
+export const starboardRefresh = sqliteTable('starboard_refresh', {
+    messageId: text('message_id').primaryKey(),
+    channelId: text('channel_id').notNull(),
+    revision: integer('revision').notNull(),
+    due: integer('due').notNull(),
+});
+
+export const shopConfirmations = sqliteTable('shop_confirmations', {
+    id: text('id').primaryKey(),
+    guildId: text('guild_id').notNull(),
+    userId: text('user_id').notNull(),
+    itemName: text('item_name').notNull(),
+    price: integer('price').notNull(),
+    expires: integer('expires').notNull(),
+});
+export const inviteBaselines = sqliteTable('invite_baselines', {
+    guildId: text('guild_id').primaryKey(),
+    uses: text('uses').notNull(),
+});

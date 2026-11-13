@@ -9,7 +9,9 @@ export const execute = async (client: DiscordBot) => {
     client.logger.info('Caching guild invites', { guildCount: client.guilds.cache.size });
     client.guilds.cache.forEach(async (guild) => {
         try {
+            if (inviteCache.get(guild.id)) return;
             const invites = await guild.invites.fetch();
+            if (inviteCache.get(guild.id)) return;
             inviteCache.set(
                 guild.id,
                 new Collection(invites.map((inv) => [inv.code, inv.uses || 0])),

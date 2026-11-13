@@ -9,6 +9,7 @@ import {
     shopItems,
     userInventory,
     economyDailyEarnings,
+    messageRewardReceipts,
 } from '../src/database/schema.js';
 import { type DiscordBot } from '../src/core/client.js';
 import { EconomyService } from '../src/features/economy/services/economyService.js';
@@ -19,7 +20,7 @@ import {
     MILESTONE_BONUSES,
     getDailyReward,
 } from '../src/features/streaks/services/streakRules.js';
-import messageRewards from '../src/features/economy/events/messageCreate.js';
+import messageRewards, { applyMessage } from '../src/features/economy/events/messageCreate.js';
 import { config } from '../src/config.js';
 
 const identifiers: string[] = [];
@@ -35,6 +36,7 @@ function user() {
 afterEach(() => {
     db.run(sql`DROP TRIGGER IF EXISTS fail_streak_credit`);
     for (const id of identifiers.splice(0)) {
+        db.delete(messageRewardReceipts).where(eq(messageRewardReceipts.userId, id)).run();
         db.delete(economyDailyEarnings).where(eq(economyDailyEarnings.userId, id)).run();
         db.delete(userInventory).where(eq(userInventory.userId, id)).run();
         db.delete(streaks).where(eq(streaks.userId, id)).run();
@@ -137,6 +139,8 @@ describe('economy transactions', () => {
     test('a simultaneous message burst consumes one reward cooldown', async () => {
         const id = user();
         const message = {
+            id: randomUUID(),
+            createdAt: new Date(),
             author: { id, bot: false },
             guild: { id: 'guild' },
             guildId: 'guild',
@@ -146,7 +150,9 @@ describe('economy transactions', () => {
             reply: async () => {},
         };
         await Promise.all(
-            Array.from({ length: 100 }, () => messageRewards.execute(message as never)),
+            Array.from({ length: 100 }, () =>
+                messageRewards.execute({ ...message, id: randomUUID() } as never),
+            ),
         );
         const balance = await economy.getBalance(id);
         expect(balance).toBeGreaterThan(100);
@@ -155,6 +161,43 @@ describe('economy transactions', () => {
 });
 
 describe('atomic streak check-ins', () => {
+    test('the message transaction checks in only for the snoojote keyword in a streak channel', () => {
+        const id = user();
+        const message = {
+            createdAt: new Date('2026-11-13T13:00:00Z'),
+            author: { id, bot: false },
+            guildId: 'guild',
+            channelId: config.streaks.channelIds[0],
+            client,
+        };
+        for (const override of [
+            { content: 'any sufficiently long message' },
+            { content: 'spaincraft' },
+            { content: 'snoojotero' },
+            { content: 'snoojote', channelId: 'public-test' },
+            { content: 'snoojote', author: { id, bot: true } },
+            { content: 'snoojote', guildId: null },
+        ]) {
+            expect(
+                applyMessage({ ...message, id: randomUUID(), ...override } as never)?.streak,
+            ).toBeFalsy();
+        }
+        const checkIn = { ...message, id: randomUUID(), content: '¡Hola, SNOOJOTE!' } as never;
+        expect(applyMessage(checkIn)?.streak?.streak).toBe(1);
+        expect(applyMessage(checkIn)).toBeUndefined();
+    });
+
+    test('the grace period preserves a streak across a missed day until it expires', () => {
+        const service = new StreakService();
+        const onTime = user();
+        const late = user();
+        const lastCheckIn = new Date('2026-11-12T06:00:00Z');
+        service.recordCheckIn(onTime, lastCheckIn);
+        service.recordCheckIn(late, lastCheckIn);
+        expect(service.recordCheckIn(onTime, new Date('2026-11-13T18:00:00Z'))?.streak).toBe(2);
+        expect(service.recordCheckIn(late, new Date('2026-11-13T18:00:01Z'))?.streak).toBe(1);
+    });
+
     test('check-ins cross 14:00, not midnight, including pre-change stored dates', async () => {
         const id = user();
         const service = new StreakService();

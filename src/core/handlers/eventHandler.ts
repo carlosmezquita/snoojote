@@ -21,7 +21,8 @@ export default async (client: DiscordBot) => {
         if (typeof event.name !== 'string' || typeof event.execute !== 'function') {
             throw new Error(`Invalid event module: ${file}`);
         }
-        registerEvent(client, event as BotEvent);
+        // Interaction dispatch must claim the ID once before selecting its handler.
+        if (event.name !== 'interactionCreate') registerEvent(client, event as BotEvent);
     }
 };
 

@@ -37,7 +37,7 @@ const logger = winston.createLogger({
         logFormat,
     ),
     transports:
-        process.env.NODE_ENV === 'test'
+        process.env.NODE_ENV === 'test' || process.env.SNOOJOTE_LINK_GUARD === '1'
             ? [new winston.transports.Console()]
             : [
                   new winston.transports.Console({

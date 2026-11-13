@@ -34,7 +34,13 @@ export class DiscordBot extends Client {
                 GatewayIntentBits.DirectMessages,
                 GatewayIntentBits.GuildMessageReactions,
             ],
-            partials: [Partials.Channel, Partials.Message, Partials.Reaction, Partials.User],
+            partials: [
+                Partials.GuildMember,
+                Partials.Channel,
+                Partials.Message,
+                Partials.Reaction,
+                Partials.User,
+            ],
         });
 
         this.commands = new Collection();

@@ -1,0 +1,108 @@
+import { and, eq, isNull } from 'drizzle-orm';
+import type { GuildMember } from 'discord.js';
+import db, { sqlite } from '../../../database/db.js';
+import { verificationCheckpoint, verificationJournal } from '../../../database/schema.js';
+import type { VerificationState } from '../types/verification.js';
+
+export function membershipKey(member: GuildMember) {
+    return JSON.stringify([member.guild.id, member.id, member.joinedTimestamp]);
+}
+
+export function pendingMemberships() {
+    return new Set(
+        db
+            .select({ key: verificationJournal.membership })
+            .from(verificationJournal)
+            .where(eq(verificationJournal.status, 'pending'))
+            .all()
+            .map((row) => row.key),
+    );
+}
+
+export function discardVerification(key: string) {
+    db.delete(verificationJournal).where(eq(verificationJournal.membership, key)).run();
+}
+
+export function readVerification(key: string) {
+    return db
+        .select()
+        .from(verificationJournal)
+        .where(eq(verificationJournal.membership, key))
+        .get();
+}
+
+export function saveVerification(key: string, state?: VerificationState, completed = false) {
+    const status = completed ? ('completed' as const) : ('pending' as const);
+    const challenge = state
+        ? JSON.stringify({
+              guildId: state.guildId,
+              channelId: state.channelId,
+              mainMsgId: state.mainMsgId,
+              challengeId: state.challengeId,
+              answer: state.answer,
+              expiresAt: state.expiresAt,
+              attempts: state.attempts,
+              warningMsgId: state.warningMsgId,
+          })
+        : null;
+    db.insert(verificationJournal)
+        .values({ membership: key, status, challenge })
+        .onConflictDoUpdate({ target: verificationJournal.membership, set: { status, challenge } })
+        .run();
+}
+
+export function lastObserved(guildId: string) {
+    return db
+        .select()
+        .from(verificationCheckpoint)
+        .where(eq(verificationCheckpoint.guildId, guildId))
+        .get()?.observedAt;
+}
+
+export function checkpoint(guildId: string, observedAt: number) {
+    db.insert(verificationCheckpoint)
+        .values({ guildId, observedAt })
+        .onConflictDoUpdate({ target: verificationCheckpoint.guildId, set: { observedAt } })
+        .run();
+}
+
+export function reserveVerification(key: string) {
+    return (
+        db
+            .insert(verificationJournal)
+            .values({ membership: key, status: 'pending' })
+            .onConflictDoNothing()
+            .returning({ key: verificationJournal.membership })
+            .get() !== undefined
+    );
+}
+
+export function unstartedMemberships() {
+    return db
+        .select({ key: verificationJournal.membership })
+        .from(verificationJournal)
+        .where(
+            and(eq(verificationJournal.status, 'pending'), isNull(verificationJournal.challenge)),
+        )
+        .all();
+}
+export function forgetUnstarted(key: string) {
+    db.delete(verificationJournal)
+        .where(
+            and(
+                eq(verificationJournal.membership, key),
+                eq(verificationJournal.status, 'pending'),
+                isNull(verificationJournal.challenge),
+            ),
+        )
+        .run();
+}
+
+export function claimAnswer(membership: string, id: string) {
+    return (
+        sqlite.run(
+            "UPDATE verification_journal SET challenge=json_set(challenge,'$.challengeId','') WHERE membership=? AND status='pending' AND json_extract(challenge,'$.challengeId')=?",
+            [membership, id],
+        ).changes === 1
+    );
+}

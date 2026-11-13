@@ -1,3 +1,5 @@
+import { isWorking } from '../../../core/restartDispatch.js';
+import { claimAnswer } from './verificationJournal.js';
 import {
     type GuildMember,
     ChannelType,
@@ -20,6 +22,13 @@ import verificationState, { type VerificationStateService } from './Verification
 import { type VerificationState } from '../types/verification.js';
 import { randomUUID } from 'crypto';
 import { config } from '../../../config.js';
+
+import {
+    discardVerification,
+    membershipKey,
+    readVerification,
+    saveVerification,
+} from './verificationJournal.js';
 
 export class VerificationService {
     private readonly starting = new Set<string>();
@@ -44,13 +53,57 @@ export class VerificationService {
     /**
      * Handles the logic when a suspicious user joins (Trap).
      */
-    async handleMemberJoin(member: GuildMember, client: DiscordBot, accountAgeMs: number) {
+    async handleMemberJoin(
+        member: GuildMember,
+        client: DiscordBot,
+        accountAgeMs: number,
+        manual = false,
+    ) {
         const guild = member.guild;
         const sessionKey = `${guild.id}:${member.id}`;
+        const key = membershipKey(member);
+        const active = this.state.get(member.id, guild.id);
+        if (active && active.membership !== key)
+            this.cleanupVerificationSession(member.id, guild.id, client, 'previous membership', 0);
         if (this.state.has(member.id, guild.id) || this.starting.has(sessionKey)) return;
+        const record = readVerification(key);
+        if (!manual && record?.status === 'completed') return;
         this.starting.add(sessionKey);
 
         try {
+            if (!record || record.status === 'completed') saveVerification(key);
+            if (record?.challenge && isWorking('verify:' + member.id) && !manual)
+                throw new Error('Verification interaction is still completing');
+            const saved: VerificationState | undefined = record?.challenge
+                ? JSON.parse(record.challenge)
+                : undefined;
+            if (saved && !member.roles.cache.has(this.SUSPECT_ROLE_ID)) {
+                // A moderator or a successful answer already removed the restriction.
+                saveVerification(key, undefined, true);
+                return;
+            }
+            if (saved && saved.challengeId && saved.mainMsgId) {
+                const channel = await guild.channels
+                    .fetch(saved.channelId)
+                    .catch((error: unknown) => {
+                        if (
+                            error &&
+                            typeof error === 'object' &&
+                            'code' in error &&
+                            error.code === 10003
+                        )
+                            return null;
+                        throw error;
+                    });
+                if (channel?.type === ChannelType.GuildText) {
+                    saved.membership = key;
+                    saved.processing = false;
+                    saved.timeouts = [];
+                    this.state.set(member.id, saved);
+                    this.setupTimers(saved, member, channel, client);
+                    return;
+                }
+            }
             await member.roles.add(this.SUSPECT_ROLE_ID);
             client.logger.info('Assigned suspect role for verification', {
                 userId: member.id,
@@ -69,11 +122,12 @@ export class VerificationService {
 
             const state: VerificationState = {
                 guildId: guild.id,
+                membership: key,
                 challengeId: '',
                 answer: '',
-                expiresAt: this.now() + this.KICK_TIMEOUT_MS,
+                expiresAt: saved?.expiresAt ?? this.now() + this.KICK_TIMEOUT_MS,
                 processing: false,
-                attempts: 0,
+                attempts: saved?.attempts ?? 0,
                 channelId: channel.id,
                 mainMsgId: '',
                 warningMsgId: null as string | null,
@@ -87,6 +141,7 @@ export class VerificationService {
             );
             const msg = await channel.send(payload);
             state.mainMsgId = msg.id;
+            saveVerification(key, state);
             this.setupTimers(state, member, channel, client);
             this.state.set(member.id, state);
         } catch (error) {
@@ -123,13 +178,28 @@ export class VerificationService {
         )
             return;
         const userId = interaction.user.id;
-        const userState = this.state.get(userId, interaction.guildId!);
+        let userState = this.state.get(userId, interaction.guildId!);
+        // The interaction can land on the listener that did not issue the CAPTCHA.
+        // Read its current generation before accepting a button or a modal.
+        if (interaction.member && 'joinedTimestamp' in interaction.member) {
+            const key = membershipKey(interaction.member as GuildMember);
+            const row = readVerification(key);
+            if (row?.status === 'pending' && row.challenge) {
+                const saved: VerificationState = JSON.parse(row.challenge);
+                if (userState?.membership === key) {
+                    Object.assign(userState, saved);
+                } else {
+                    userState = { ...saved, membership: key, processing: false, timeouts: [] };
+                }
+            } else userState = undefined;
+        }
         const expectedId = `${interaction.isButton() ? 'verify_btn_' : 'verify_modal_'}${userState?.challengeId}`;
         if (
             !userState ||
             userState.channelId !== interaction.channelId ||
             userState.expiresAt <= this.now() ||
             userState.processing ||
+            userState.attempts >= this.MAX_ATTEMPTS ||
             !userState.challengeId ||
             interaction.customId !== expectedId
         ) {
@@ -154,6 +224,13 @@ export class VerificationService {
             return;
         }
         if (!interaction.isModalSubmit()) return;
+        if (userState.membership && !claimAnswer(userState.membership, userState.challengeId)) {
+            await interaction.reply({
+                content: 'La verificación ha caducado o ya se está procesando.',
+                ephemeral: true,
+            });
+            return;
+        }
         const answer = interaction.fields.getTextInputValue('captcha_input');
         if (answer.toUpperCase() === userState.answer.toUpperCase()) {
             userState.processing = true;
@@ -188,6 +265,7 @@ export class VerificationService {
             } else {
                 throw new Error('Verification member is unavailable');
             }
+            if (userState.membership) saveVerification(userState.membership, undefined, true);
             verified = true;
             userState.answer = '';
 
@@ -239,7 +317,10 @@ export class VerificationService {
                     3000,
                     interaction.channel as TextChannel,
                 );
-            else userState.processing = false;
+            else {
+                userState.processing = false;
+                if (userState.membership) saveVerification(userState.membership, userState);
+            }
         }
     }
 
@@ -250,8 +331,9 @@ export class VerificationService {
         client: DiscordBot,
     ) {
         // Acknowledge before logging, rendering a CAPTCHA, or making moderation requests.
-        await interaction.deferUpdate();
         userState.attempts++;
+        if (userState.membership) saveVerification(userState.membership, userState);
+        await interaction.deferUpdate();
         const attemptsLeft = this.MAX_ATTEMPTS - userState.attempts;
         client.logger.info('Verification challenge failed', {
             userId,
@@ -270,6 +352,7 @@ export class VerificationService {
             try {
                 if (interaction.member && 'kick' in interaction.member) {
                     await interaction.member.kick('Falló 3 veces.');
+                    if (userState.membership) discardVerification(userState.membership);
                 }
                 await this.sendLog(
                     interaction.guild,
@@ -323,6 +406,7 @@ export class VerificationService {
                         userState,
                     );
                     await mainMsg.edit(newPayload);
+                    if (userState.membership) saveVerification(userState.membership, userState);
                     await interaction.followUp({
                         content: `❌ **Incorrecto / Incorrect.**`,
                         ephemeral: true,
@@ -346,6 +430,7 @@ export class VerificationService {
                     try {
                         const newMsg = await interaction.channel.send(newPayload);
                         userState.mainMsgId = newMsg.id;
+                        if (userState.membership) saveVerification(userState.membership, userState);
                         this.state.set(userId, userState);
                     } catch (sendError) {
                         client.logger.error('Failed to send replacement verification challenge', {
@@ -403,6 +488,8 @@ export class VerificationService {
         client: DiscordBot,
     ) {
         const scheduleWarning = (ms: number, text: string) => {
+            ms += state.expiresAt - this.KICK_TIMEOUT_MS - this.now();
+            if (ms <= 0) return;
             const tid = setTimeout(async () => {
                 try {
                     if (state.warningMsgId) {
@@ -453,18 +540,43 @@ export class VerificationService {
         scheduleWarning(8 * 60 * 1000, 'Quedan 2 minutos / 2 minutes remaining');
         scheduleWarning(9.5 * 60 * 1000, '⚠️ **30 segundos restantes / 30 seconds remaining!**');
 
-        const kickTid = setTimeout(async () => {
-            const currentMember = await member.guild.members.fetch(member.id).catch((error) => {
-                client.logger.warn('Failed to fetch member for verification timeout', {
-                    userId: member.id,
-                    guildId: member.guild.id,
-                    error,
+        const expire = async () => {
+            if (this.state.get(member.id, member.guild.id) !== state) return;
+            if (isWorking('verify:' + member.id) || state.processing) {
+                state.timeouts.push(setTimeout(expire, 1000));
+                return;
+            }
+            if (state.membership && readVerification(state.membership)?.status !== 'pending') {
+                this.cleanupVerificationSession(
+                    member.id,
+                    member.guild.id,
+                    client,
+                    'verification already finished',
+                    0,
+                    channel,
+                );
+                return;
+            }
+            const currentMember = await member.guild.members
+                .fetch({ user: member.id, force: true })
+                .catch((error) => {
+                    client.logger.warn('Failed to fetch member for verification timeout', {
+                        userId: member.id,
+                        guildId: member.guild.id,
+                        error,
+                    });
+                    return null;
                 });
-                return null;
-            });
             try {
-                if (currentMember && currentMember.roles.cache.has(this.SUSPECT_ROLE_ID)) {
+                if (this.state.get(member.id, member.guild.id) !== state || state.processing)
+                    return;
+                if (
+                    currentMember &&
+                    membershipKey(currentMember) === state.membership &&
+                    currentMember.roles.cache.has(this.SUSPECT_ROLE_ID)
+                ) {
                     await currentMember.kick('Tiempo agotado.');
+                    if (state.membership) discardVerification(state.membership);
                     await this.sendLog(
                         member.guild,
                         `💀 **Expulsado (Timeout):** <@${member.id}>`,
@@ -491,16 +603,21 @@ export class VerificationService {
                     error,
                 });
             } finally {
-                this.cleanupVerificationSession(
-                    member.id,
-                    member.guild.id,
-                    client,
-                    'verification timeout',
-                    0,
-                    channel,
-                );
+                if (this.state.get(member.id, member.guild.id) === state && !state.processing)
+                    this.cleanupVerificationSession(
+                        member.id,
+                        member.guild.id,
+                        client,
+                        'verification timeout',
+                        0,
+                        channel,
+                    );
             }
-        }, this.KICK_TIMEOUT_MS);
+        };
+        const kickTid = setTimeout(
+            expire,
+            state.attempts >= this.MAX_ATTEMPTS ? 0 : Math.max(0, state.expiresAt - this.now()),
+        );
 
         state.timeouts.push(kickTid);
     }

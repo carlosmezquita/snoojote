@@ -1,3 +1,8 @@
+import { confirmPurchase } from '../../features/economy/commands/buy.js';
+import { execute as ticket } from '../../features/tickets/events/ticketInteraction.js';
+import { execute as captcha } from '../../features/moderation/events/captchaInteraction.js';
+import { execute as role } from '../../features/roles/events/rPlaceButton.js';
+import { serveOnce, reportDispatchError } from '../restartDispatch.js';
 import { glob } from 'glob';
 import { type DiscordBot } from '../client.js';
 import { type ChatInputCommandInteraction, MessageFlags, PermissionFlagsBits } from 'discord.js';
@@ -50,8 +55,49 @@ export default async (client: DiscordBot) => {
     }
 
     client.on('interactionCreate', (interaction) => {
-        if (!interaction.isChatInputCommand()) return;
-        void executeCommand(interaction, client);
+        if (!interaction.inGuild() || (config.guildId && interaction.guildId !== config.guildId))
+            return;
+        if (
+            !interaction.isChatInputCommand() &&
+            !interaction.isMessageComponent() &&
+            !interaction.isModalSubmit()
+        )
+            return;
+        let resource: string | undefined;
+        if (interaction.isChatInputCommand()) {
+            if (interaction.commandName === 'ticket') resource = 'ticket:' + interaction.channelId;
+            if (interaction.commandName === 'challenge')
+                resource =
+                    'verify:' + (interaction.options.getUser('user')?.id ?? interaction.user.id);
+        } else {
+            const id = interaction.customId;
+            if (id.startsWith('verify_')) resource = 'verify:' + interaction.user.id;
+            else if (/^(confirm|cancel)_buy:/.test(id)) resource = 'buy:' + interaction.user.id;
+            else if (id.startsWith('ticket_modal_'))
+                resource = 'create-ticket:' + interaction.user.id;
+            else if (id.includes('ticket')) resource = 'ticket:' + interaction.channelId;
+            else if (id === 'give_rplace2023_role') resource = 'role:' + interaction.user.id;
+        }
+        void serveOnce(
+            'interaction:' + interaction.id,
+            async () => {
+                if (interaction.isChatInputCommand()) return executeCommand(interaction, client);
+                if (interaction.isButton() && /^(confirm|cancel)_buy:/.test(interaction.customId))
+                    return confirmPurchase(interaction);
+                if (interaction.customId.startsWith('verify_')) return captcha(interaction, client);
+                if (interaction.customId === 'give_rplace2023_role')
+                    return role(interaction, client);
+                return ticket(interaction, client);
+            },
+            {
+                resource,
+                busy: () =>
+                    interaction.reply({
+                        content: 'Hay una operación en curso. Inténtalo de nuevo en unos segundos.',
+                        ephemeral: true,
+                    }),
+            },
+        ).catch(reportDispatchError);
     });
 };
 

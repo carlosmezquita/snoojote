@@ -92,13 +92,14 @@ export class ResponseTimeService {
     private readonly bootstrapRetryAt = new Map<string, number>();
     /**
      * Records the time of the first response to a ticket by a staff member.
-     * Only updates if firstResponseAt is currently null.
+     * History recovery may correct a later live reply recorded during startup.
      */
     async recordResponse(
         ticketId: number,
         staffId: string,
         timestamp: Date,
         messageId?: string,
+        source: 'gateway' | 'history' = 'gateway',
     ): Promise<void> {
         db.transaction(
             (tx) => {
@@ -113,30 +114,68 @@ export class ResponseTimeService {
                     ticket.requesterUnavailableAt
                 )
                     return;
+                const existing = messageId
+                    ? tx
+                          .select({ id: ticketStaffActivity.id })
+                          .from(ticketStaffActivity)
+                          .where(
+                              and(
+                                  eq(ticketStaffActivity.ticketId, ticketId),
+                                  eq(ticketStaffActivity.messageId, messageId),
+                              ),
+                          )
+                          .get()
+                    : undefined;
+                let responseTimeMs: number | null = null;
+                const elapsed = timestamp.getTime() - ticket.createdAt.getTime();
+                const history = source === 'history';
                 if (
-                    messageId &&
-                    tx
-                        .select({ id: ticketStaffActivity.id })
+                    history &&
+                    (ticket.status !== 'open' ||
+                        (ticket.waitOutcome && ticket.waitOutcome !== 'responded'))
+                )
+                    return;
+                if (history && ticket.firstResponseAt) {
+                    const previous = tx
+                        .select()
                         .from(ticketStaffActivity)
                         .where(
                             and(
                                 eq(ticketStaffActivity.ticketId, ticketId),
-                                eq(ticketStaffActivity.messageId, messageId),
+                                isNotNull(ticketStaffActivity.responseTimeMs),
                             ),
                         )
-                        .limit(1)
-                        .get()
-                )
-                    return;
-                let responseTimeMs: number | null = null;
-                if (!ticket.firstResponseAt) {
-                    if (!ticket.waitOutcome)
-                        responseTimeMs = timestamp.getTime() - ticket.createdAt.getTime();
+                        .get();
+                    // SQLite stores dates in seconds. The activity sample retains milliseconds.
+                    const previousElapsed =
+                        previous?.responseTimeMs ??
+                        ticket.firstResponseAt.getTime() - ticket.createdAt.getTime();
+                    if (
+                        elapsed > previousElapsed ||
+                        (elapsed === previousElapsed &&
+                            !(
+                                messageId &&
+                                previous?.messageId &&
+                                /^\d+$/.test(previous.messageId) &&
+                                /^\d+$/.test(messageId) &&
+                                BigInt(messageId) < BigInt(previous.messageId)
+                            ))
+                    )
+                        return;
+                    if (previous)
+                        tx.update(ticketStaffActivity)
+                            .set({ responseTimeMs: null })
+                            .where(eq(ticketStaffActivity.id, previous.id))
+                            .run();
+                }
+                if (existing && !history) return;
+                if (!ticket.firstResponseAt || history) {
+                    if (!ticket.waitOutcome || history) responseTimeMs = elapsed;
                     tx.update(tickets)
                         .set({
                             firstResponseAt: timestamp,
                             firstResponseBy: staffId,
-                            ...(!ticket.waitOutcome
+                            ...(!ticket.waitOutcome || history
                                 ? { waitOutcome: 'responded' as const, waitEndedAt: timestamp }
                                 : {}),
                         })
@@ -145,16 +184,22 @@ export class ResponseTimeService {
                     historicalLoadCache = null;
                     this.historyCache = undefined;
                 }
-                tx.insert(ticketStaffActivity)
-                    .values({
-                        ticketId,
-                        staffId,
-                        action: 'message',
-                        messageId,
-                        occurredAt: timestamp,
-                        responseTimeMs,
-                    })
-                    .run();
+                if (existing)
+                    tx.update(ticketStaffActivity)
+                        .set({ responseTimeMs })
+                        .where(eq(ticketStaffActivity.id, existing.id))
+                        .run();
+                else
+                    tx.insert(ticketStaffActivity)
+                        .values({
+                            ticketId,
+                            staffId,
+                            action: 'message',
+                            messageId,
+                            occurredAt: timestamp,
+                            responseTimeMs,
+                        })
+                        .run();
                 enrichedStaffProfileCache.clear();
             },
             { behavior: 'immediate' },

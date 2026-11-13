@@ -1,5 +1,5 @@
 import { Events, type Message } from 'discord.js';
-import { type DiscordBot } from '../../../core/client.js';
+import logger from '../../../utils/logger.js';
 import db from '../../../database/db.js';
 import { tickets } from '../../../database/schema.js';
 import { eq, and, inArray } from 'drizzle-orm';
@@ -9,7 +9,7 @@ import { isTicketStaff } from '../utils/ticketStaff.js';
 export default {
     name: Events.MessageCreate,
     once: false,
-    async execute(message: Message, client: DiscordBot) {
+    async execute(message: Message, client = { logger }) {
         if (message.author.bot || !message.guild) return;
 
         // Only proceed if the user is ticket staff.

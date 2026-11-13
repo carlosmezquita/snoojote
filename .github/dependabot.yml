@@ -1,0 +1,26 @@
+version: 2
+updates:
+    - package-ecosystem: bun
+      directory: /
+      schedule:
+          interval: weekly
+          day: monday
+          time: '08:00'
+          timezone: Atlantic/Canary
+      open-pull-requests-limit: 5
+      assignees: [carlosmezquita]
+      groups:
+          routine-updates:
+              applies-to: version-updates
+              update-types: [minor, patch]
+    - package-ecosystem: github-actions
+      directory: /
+      schedule:
+          interval: weekly
+          day: monday
+          time: '08:00'
+          timezone: Atlantic/Canary
+      assignees: [carlosmezquita]
+      groups:
+          actions:
+              patterns: ['*']

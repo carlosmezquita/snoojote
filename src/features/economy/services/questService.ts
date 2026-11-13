@@ -1,5 +1,5 @@
 import { ChannelType, PermissionFlagsBits, type TextChannel } from 'discord.js';
-import { type DiscordBot } from '../../../core/client.js';
+import type { Client } from 'discord.js';
 import { config } from '../../../config.js';
 
 export enum QuestType {
@@ -34,7 +34,7 @@ export class QuestService {
     }
 
     // Generate a new random quest
-    generateQuest(client: DiscordBot, userId?: string): QuestData {
+    generateQuest(client: Client, userId?: string): QuestData {
         const types = [QuestType.MESSAGE_COUNT, QuestType.VOICE_TIME];
         const selectedType = types[Math.floor(Math.random() * types.length)];
 
@@ -45,7 +45,7 @@ export class QuestService {
         }
     }
 
-    private generateMessageQuest(client: DiscordBot, userId?: string): QuestData {
+    private generateMessageQuest(client: Client, userId?: string): QuestData {
         // Find a suitable text channel (not rules, not announcements, etc if possible)
         // For simplicity, we can fetch cached channels or just pick a random text channel the bot can see.
         // In a real app, you might want to filter by specific categories.

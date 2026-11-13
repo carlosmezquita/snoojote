@@ -8,6 +8,7 @@ import { execute } from '../src/features/tickets/events/ticketInteraction.js';
 import { ResponseTimeService } from '../src/features/tickets/services/responseTimeService.js';
 import { execute as requesterLeave } from '../src/features/tickets/events/requesterLeave.js';
 import { execute as requesterJoin } from '../src/features/tickets/events/requesterJoin.js';
+import { scanFirstReply } from '../src/features/tickets/events/firstReplyRecovery.js';
 import messageCreate from '../src/features/tickets/events/messageCreate.js';
 
 const ids: number[] = [];
@@ -93,7 +94,11 @@ describe('ticket authorization and response recording', () => {
         const row = ticket();
         const other = ticket();
         const service = new ResponseTimeService();
-        requesterLeave({ id: row.userId, guild: { id: row.guildId } } as never);
+        await requesterLeave({
+            joinedTimestamp: 1,
+            id: row.userId,
+            guild: { id: row.guildId },
+        } as never);
         const departed = db.select().from(tickets).where(eq(tickets.id, row.id)).get()!;
         expect(departed.waitOutcome).toBe('requester_unavailable');
         expect(departed.waitEndedAt).not.toBeNull();
@@ -103,7 +108,11 @@ describe('ticket authorization and response recording', () => {
         expect(
             db.select().from(tickets).where(eq(tickets.id, row.id)).get()!.firstResponseAt,
         ).toBeNull();
-        requesterJoin({ id: row.userId, guild: { id: row.guildId } } as never);
+        requesterJoin({
+            joinedTimestamp: Date.now(),
+            id: row.userId,
+            guild: { id: row.guildId },
+        } as never);
         expect(await service.getUnansweredQueueLength(row.guildId!)).toBe(1);
         await service.recordResponse(row.id, 'staff', new Date(), 'after-return');
         const returned = db.select().from(tickets).where(eq(tickets.id, row.id)).get()!;
@@ -198,6 +207,95 @@ describe('ticket authorization and response recording', () => {
         expect(denied).toContain('No tienes permiso');
         expect(db.select().from(tickets).where(eq(tickets.id, row.id)).get()!.status).toBe('open');
     });
+    test('rejoin delivered first ends the original wait, stale leaves and duplicate joins cannot flip availability', async () => {
+        const row = ticket();
+        const start = row.createdAt.getTime();
+        db.update(tickets)
+            .set({ requesterMembershipSince: start - 5000 })
+            .where(eq(tickets.id, row.id))
+            .run();
+        const m = (joinedTimestamp: number) =>
+            ({ id: row.userId, guild: { id: row.guildId }, joinedTimestamp }) as never;
+        const read = () => db.select().from(tickets).where(eq(tickets.id, row.id)).get()!;
+        requesterJoin(m(start + 10000));
+        const ended = read().waitEndedAt;
+        expect(ended).not.toBeNull();
+        await requesterLeave(m(start - 5000));
+        requesterJoin(m(start + 10000));
+        expect(read()).toMatchObject({
+            waitOutcome: 'requester_unavailable',
+            waitEndedAt: ended,
+            requesterUnavailableAt: null,
+        });
+        await requesterLeave(m(start + 10000));
+        const absent = read().requesterUnavailableAt;
+        expect(absent).not.toBeNull();
+        requesterJoin(m(start + 10000));
+        await requesterLeave(m(start + 10000));
+        expect(read().requesterUnavailableAt).toEqual(absent);
+        requesterJoin(m(start + 20000));
+        expect(read()).toMatchObject({ waitEndedAt: ended, requesterUnavailableAt: null });
+    });
+    test('an uncached removal lookup cannot overwrite a rejoin or include a newly opened ticket', async () => {
+        const row = ticket();
+        let failLookup!: () => void;
+        const partial = {
+            id: row.userId,
+            joinedTimestamp: null,
+            guild: {
+                id: row.guildId,
+                members: {
+                    fetch: () =>
+                        new Promise((_resolve, reject) => {
+                            failLookup = () =>
+                                reject(Object.assign(new Error('Unknown Member'), { code: 10007 }));
+                        }),
+                },
+            },
+        };
+        const removal = requesterLeave(partial as never);
+        requesterJoin({
+            id: row.userId,
+            joinedTimestamp: Date.now(),
+            guild: { id: row.guildId },
+        } as never);
+        const other = ticket();
+        db.update(tickets)
+            .set({ userId: row.userId, guildId: row.guildId })
+            .where(eq(tickets.id, other.id))
+            .run();
+        failLookup();
+        await removal;
+        const read = (id: number) => db.select().from(tickets).where(eq(tickets.id, id)).get()!;
+        expect(read(row.id)).toMatchObject({
+            requesterUnavailableAt: null,
+            waitOutcome: 'requester_unavailable',
+        });
+        expect(read(other.id)).toMatchObject({ requesterUnavailableAt: null, waitOutcome: null });
+    });
+    test('a delayed removal from before ticket creation cannot end a new wait', async () => {
+        const row = ticket();
+        const joined = row.createdAt.getTime() - 10000;
+        db.update(tickets)
+            .set({ requesterMembershipSince: joined })
+            .where(eq(tickets.id, row.id))
+            .run();
+        await requesterLeave({
+            id: row.userId,
+            guild: { id: row.guildId },
+            joinedTimestamp: joined - 1,
+        } as never);
+        requesterJoin({
+            id: row.userId,
+            guild: { id: row.guildId },
+            joinedTimestamp: joined,
+        } as never);
+        expect(db.select().from(tickets).where(eq(tickets.id, row.id)).get()).toMatchObject({
+            waitOutcome: null,
+            waitEndedAt: null,
+            requesterUnavailableAt: null,
+        });
+    });
     test('duplicate gateway messages record activity once', async () => {
         const row = ticket();
         const service = new ResponseTimeService();
@@ -217,6 +315,48 @@ describe('ticket authorization and response recording', () => {
         expect(db.select().from(tickets).where(eq(tickets.id, row.id)).get()!.firstResponseBy).toBe(
             'staff',
         );
+    });
+    test('history pages recover the earliest staff message across a live reply and retries', async () => {
+        const row = ticket();
+        const earlier = new Date(row.createdAt.getTime() + 5017);
+        const later = new Date(earlier.getTime() + 200);
+        await new ResponseTimeService().recordResponse(row.id, 'live', later, '104');
+        const message = (id: number, author: string, bot = false) => ({
+            id: String(id),
+            createdAt: earlier,
+            author: { id: author, bot },
+            member: { id: author, user: { bot }, permissions: new PermissionsBitField(8n) },
+        });
+        const channel = {
+            id: '0',
+            messages: {
+                fetch: async ({ after }: { after: string }) => {
+                    const page =
+                        after === '0'
+                            ? Array.from({ length: 100 }, (_, i) => message(i + 1, row.userId))
+                            : [
+                                  message(103, 'other'),
+                                  message(102, 'earliest'),
+                                  message(101, 'bot', true),
+                              ];
+                    return new Collection(page.map((m) => [m.id, m]));
+                },
+            },
+        };
+        for (let attempt = 0; attempt < 2; attempt++)
+            await scanFirstReply(channel as never, row, later);
+        const record = db.select().from(tickets).where(eq(tickets.id, row.id)).get()!;
+        expect(record.firstResponseBy).toBe('earliest');
+        expect(record.waitEndedAt?.getTime()).toBe(Math.floor(earlier.getTime() / 1000) * 1000);
+        const activity = db
+            .select()
+            .from(ticketStaffActivity)
+            .where(eq(ticketStaffActivity.ticketId, row.id))
+            .all();
+        expect(activity.map((a) => [a.staffId, a.responseTimeMs])).toEqual([
+            ['live', null],
+            ['earliest', 5017],
+        ]);
     });
     test('closed tickets do not acquire a new first response', async () => {
         const row = ticket();
