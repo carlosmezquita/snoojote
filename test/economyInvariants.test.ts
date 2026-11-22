@@ -185,7 +185,7 @@ describe('atomic streak check-ins', () => {
         }
     });
 
-    test('the message transaction checks in for Spaincraft forms and accepted typos in the dedicated streaks channel', () => {
+    test('the message transaction checks in for Spaincraft and its typos within longer words in the streaks channel', () => {
         const id = user();
         const message = {
             createdAt: new Date('2026-11-13T13:00:00Z'),
@@ -198,14 +198,9 @@ describe('atomic streak check-ins', () => {
             { content: 'any sufficiently long message' },
             { content: 'snoojote' },
             { content: 'snoojotear' },
-            { content: 'spaincrafter' },
-            { content: 'myspaincraft' },
-            { content: 'spaincraftearé', channelId: config.channels.main },
-            { content: 'éspaincraft' },
-            { content: 'espaíncraftiana' },
-            { content: 'spaincrafteando123' },
-            { content: 'spaincraftianoñ' },
-            { content: 'nick_spaincrafteaba' },
+            { content: 'superminecraftilandia' },
+            { content: 'spain craft' },
+            { content: 'superspaincraftilandia', channelId: config.channels.main },
             { content: 'spaincraft', author: { id, bot: true } },
             { content: 'spaincraft', guildId: null },
         ]) {
@@ -248,6 +243,17 @@ describe('atomic streak check-ins', () => {
             'spainncraftiana',
             'spaincrxfteando',
             'spainkraf',
+            'superspaincraftilandia',
+            '¡Bienvenidos a SuperSapincraftilandia!',
+            'superspincraftilandia',
+            'superspainncraftilandia',
+            'superspaincrxftilandia',
+            'spaincrafter',
+            'myspaincraft',
+            'espaíncraftiana',
+            'spaincrafteando123',
+            'spaincraftianoñ',
+            'nick_spaincrafteaba',
         ]) {
             expect(
                 applyMessage({

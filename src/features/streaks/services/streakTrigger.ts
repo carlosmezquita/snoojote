@@ -10,26 +10,7 @@ for (const [index, letter] of [...stem].entries()) {
     }
 }
 
-const attachedPronouns = '(?:(?:me|te|se|nos|os)(?:l[oa]s?)?|l[oa]s?|les?)';
-const verbEndings = Object.values({
-    presentIndicative: 'o|as|a|amos|ais|an',
-    imperfectIndicative: 'aba|abas|abamos|abais|aban',
-    preterite: 'e|aste|o|amos|asteis|aron',
-    futureIndicative: 'are|aras|ara|aremos|areis|aran',
-    conditional: 'aria|arias|ariamos|ariais|arian',
-    presentSubjunctive: 'e|es|emos|eis|en',
-    imperfectSubjunctive: 'ara|aras|aramos|arais|aran|ase|ases|asemos|aseis|asen',
-    futureSubjunctive: 'are|ares|aremos|areis|aren',
-    nonFinite: 'ar|ando|ad[oa]s?',
-    vosotrosCommand: 'ad',
-    withAttachedPronouns: `(?:ar|ando|a|ad|e|en|emos)${attachedPronouns}`,
-    commandsWithOsOrNos: '(?:aos|emonos)(?:l[oa]s?)?|emosel[oa]s?',
-}).join('|');
-
-const streakTrigger = new RegExp(
-    String.raw`(?<![\p{L}\p{M}\p{N}_])(?:${stemSpellings.join('|')})(?:e(?:${verbEndings})|ian[oa]s?)?(?![\p{L}\p{M}\p{N}_])`,
-    'iu',
-);
+const streakTrigger = new RegExp(stemSpellings.join('|'), 'iu');
 
 export function matchesStreakTrigger(content: string): boolean {
     return streakTrigger.test(content.normalize('NFD').replace(/([aeiou])\u0301/gi, '$1'));
