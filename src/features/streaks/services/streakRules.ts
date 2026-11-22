@@ -1,6 +1,7 @@
 import { config } from '../../../config.js';
 
 export const STREAK_TIME_ZONE = 'Europe/Madrid';
+export const STREAK_RESET_HOUR = 14;
 export const STREAK_GRACE_PERIOD_MS = config.streaks.gracePeriodHours * 60 * 60 * 1000;
 export const DAILY_REWARD_BASE = config.economy.dailyReward.base;
 export const DAILY_REWARD_PER_STREAK_DAY = config.economy.dailyReward.perStreakDay;
@@ -46,7 +47,7 @@ export function getStreakDateKey(date: Date): string {
             .map((part) => [part.type, part.value]),
     );
     const day = new Date(`${parts.year}-${parts.month}-${parts.day}T00:00:00Z`);
-    if (Number(parts.hour) < 14) day.setUTCDate(day.getUTCDate() - 1);
+    if (Number(parts.hour) < STREAK_RESET_HOUR) day.setUTCDate(day.getUTCDate() - 1);
     return day.toISOString().slice(0, 10);
 }
 

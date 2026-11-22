@@ -12,10 +12,15 @@ import {
     isConsecutiveDay,
     isWithinGracePeriod,
     MILESTONE_BONUSES,
+    STREAK_RESET_HOUR,
 } from './streakRules.js';
 
 const BOT_CHANNEL_ID = config.channels.bot;
 const STREAK_FREEZE_VALUE = 'STREAK_FREEZE';
+
+function formatStreakDays(days: number): string {
+    return `${days} ${days === 1 ? 'día' : 'días'}`;
+}
 
 export class StreakService {
     async notifyCheckIn(
@@ -25,7 +30,7 @@ export class StreakService {
     ) {
         if (!result) return;
         const content = result.isNew
-            ? `¡Hola ${message.author.toString()}! Has empezado tu primera racha. Para mantenerla, escribe **spaincraft** cada día en el canal de rachas.`
+            ? `¡Hola ${message.author.toString()}! Has empezado tu primera racha y ya llevas **${formatStreakDays(result.streak)}**. Para mantenerla, escribe **spaincraft** cada día en <#${config.channels.streaks}> a partir de las **${STREAK_RESET_HOUR}:00** (hora peninsular española).`
             : this.buildStreakMessage(
                   message,
                   result.streak,
@@ -121,7 +126,9 @@ export class StreakService {
         remainingFreezes: number | null,
         newMilestones: number[],
     ) {
-        const lines = [`La racha actual de ${message.author.toString()} es de ${streak} días.`];
+        const lines = [
+            `La racha actual de ${message.author.toString()} es de ${formatStreakDays(streak)}.`,
+        ];
 
         if (remainingFreezes !== null) {
             lines.push('🧊 Se usó un seguro para proteger tu racha.');
@@ -137,7 +144,9 @@ export class StreakService {
         }
 
         for (const milestone of newMilestones) {
-            lines.push(`🎁 Hito de ${milestone} días: +${MILESTONE_BONUSES[milestone]} ₧.`);
+            lines.push(
+                `🎁 Hito de ${formatStreakDays(milestone)}: +${MILESTONE_BONUSES[milestone]} ₧.`,
+            );
         }
 
         return lines.join('\n');

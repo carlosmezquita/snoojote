@@ -15,6 +15,7 @@ import { type DiscordBot } from '../src/core/client.js';
 import { EconomyService } from '../src/features/economy/services/economyService.js';
 import { QuestType } from '../src/features/economy/services/questService.js';
 import { StreakService } from '../src/features/streaks/services/StreakService.js';
+import { matchesStreakTrigger } from '../src/features/streaks/services/streakTrigger.js';
 import {
     getSpainDateKey,
     MILESTONE_BONUSES,
@@ -161,7 +162,30 @@ describe('economy transactions', () => {
 });
 
 describe('atomic streak check-ins', () => {
-    test('the message transaction checks in only for the Spaincraft keyword or accepted typos in the dedicated streaks channel', () => {
+    test('recognizes the regular -ar conjugation with or without accents', () => {
+        const endings = [
+            'o as a amos áis an',
+            'aba abas aba ábamos abais aban',
+            'é aste ó amos asteis aron',
+            'aré arás ará aremos aréis arán',
+            'aría arías aría aríamos aríais arían',
+            'e es e emos éis en',
+            'ara aras ara áramos arais aran',
+            'ase ases ase ásemos aseis asen',
+            'are ares are áremos areis aren',
+            'a á e emos ad en',
+            'ar ando ado ada ados adas',
+            'arlo ándoselo ádmelo aos émonos émoselo',
+        ];
+        for (const ending of new Set(endings.join(' ').split(' '))) {
+            const form = `spaincrafte${ending}`;
+            const unaccented = form.normalize('NFD').replace(/\u0301/gu, '');
+            expect(matchesStreakTrigger(`¡${form}!`), form).toBe(true);
+            expect(matchesStreakTrigger(unaccented.toUpperCase()), unaccented).toBe(true);
+        }
+    });
+
+    test('the message transaction checks in for Spaincraft and its typos within longer words in the streaks channel', () => {
         const id = user();
         const message = {
             createdAt: new Date('2026-11-13T13:00:00Z'),
@@ -173,10 +197,10 @@ describe('atomic streak check-ins', () => {
         for (const override of [
             { content: 'any sufficiently long message' },
             { content: 'snoojote' },
-            { content: 'spaincrafter' },
-            { content: 'myspaincraft' },
-            { content: 'spaincraft', channelId: config.channels.main },
-            { content: 'éspaincraft' },
+            { content: 'snoojotear' },
+            { content: 'superminecraftilandia' },
+            { content: 'spain craft' },
+            { content: 'superspaincraftilandia', channelId: config.channels.main },
             { content: 'spaincraft', author: { id, bot: true } },
             { content: 'spaincraft', guildId: null },
         ]) {
@@ -193,6 +217,43 @@ describe('atomic streak check-ins', () => {
             'spaincrfat',
             'spaincratf',
             'spaincraf',
+            '¡Vamos a spaincraftear!',
+            'Mañana SPAINCRAFTEARÉ.',
+            'Mañana spaincrafteare.',
+            'spaincraftearé'.normalize('NFD'),
+            'spaincrafteaba',
+            'spaincrafteando',
+            'spaincrafteasteis',
+            'spaincraftearíamos',
+            'spaincrafteéis',
+            'spaincrafteásemos',
+            'spaincraftearen',
+            'spaincrafteadas',
+            'spaincrafteádmelo',
+            'spaincrafteándome',
+            'spaincrafteandome',
+            'spaincrafteémonos',
+            'spaincraftiano',
+            'spaincraftiana',
+            'spaincraftianos',
+            'spaincraftianas',
+            'spainkrafteando',
+            'sapincraftiana',
+            'spincrafteaba',
+            'spainncraftiana',
+            'spaincrxfteando',
+            'spainkraf',
+            'superspaincraftilandia',
+            '¡Bienvenidos a SuperSapincraftilandia!',
+            'superspincraftilandia',
+            'superspainncraftilandia',
+            'superspaincrxftilandia',
+            'spaincrafter',
+            'myspaincraft',
+            'espaíncraftiana',
+            'spaincrafteando123',
+            'spaincraftianoñ',
+            'nick_spaincrafteaba',
         ]) {
             expect(
                 applyMessage({
@@ -203,6 +264,38 @@ describe('atomic streak check-ins', () => {
                 } as never)?.streak?.streak,
             ).toBe(1);
         }
+    });
+
+    test('the first check-in names the streaks channel and reset time and announcements pluralize days', async () => {
+        const id = user();
+        const service = new StreakService();
+        const notifications: string[] = [];
+        const client = {
+            channels: {
+                cache: new Collection([
+                    [
+                        config.channels.bot,
+                        { send: ({ content }: { content: string }) => notifications.push(content) },
+                    ],
+                ]),
+            },
+        } as unknown as DiscordBot;
+        const message = {
+            author: { id, toString: () => `<@${id}>` },
+            react: async () => {},
+        } as never;
+        for (const day of [13, 14, 20]) {
+            const result = service.recordCheckIn(id, new Date(`2026-11-${day}T13:00:00Z`));
+            await service.notifyCheckIn(message, client, result);
+        }
+
+        expect(notifications).toHaveLength(3);
+        expect(notifications[0]).toContain('**1 día**');
+        expect(notifications[0]).toContain(
+            `escribe **spaincraft** cada día en <#${config.channels.streaks}> a partir de las **14:00** (hora peninsular española)`,
+        );
+        expect(notifications[1]).toContain('2 días.');
+        expect(notifications[2]).toContain('1 día.');
     });
 
     test('the grace period preserves a streak across a missed day until it expires', () => {
